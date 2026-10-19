@@ -1,0 +1,107 @@
+import { NextResponse, type NextRequest } from "next/server";
+import { adminClient, log } from "@/lib/supabase/admin";
+import { sendMessage } from "@/lib/telegram";
+
+export const dynamic = "force-dynamic";
+export const maxDuration = 60;
+
+/**
+ * Procesa la cola job_queue. Lo llama pg_cron cada 5 min (ver README).
+ * Hito 2/3: soporta "notify" y deja lista la mecánica de pausa/backoff para el hito 4 (IA).
+ */
+
+class RateLimited extends Error {
+  constructor(public retryAfterSec: number) {
+    super("rate_limited");
+  }
+}
+
+type Job = {
+  id: string;
+  kind: string;
+  payload: Record<string, unknown>;
+  attempts: number;
+  status: string;
+  source_chat: number | null;
+};
+
+const MAX_ATTEMPTS = 6;
+const BATCH = 5;
+
+async function runJob(job: Job): Promise<unknown> {
+  switch (job.kind) {
+    case "notify": {
+      const chat = Number(job.payload.chat_id ?? job.source_chat);
+      const r = await sendMessage(chat, String(job.payload.text ?? ""));
+      if (!r.ok && /Too Many Requests/i.test(r.description ?? "")) throw new RateLimited(30);
+      if (!r.ok) throw new Error(r.description ?? "telegram error");
+      return { sent: true };
+    }
+    // case "classify": hito 4 (Haiku). Un 429 de Anthropic debe lanzar RateLimited(retry-after).
+    default:
+      throw new Error(`Tipo de trabajo desconocido: ${job.kind}`);
+  }
+}
+
+async function handle(req: NextRequest) {
+  const auth = req.headers.get("authorization");
+  if (auth !== `Bearer ${process.env.WORKER_SECRET}`) {
+    return NextResponse.json({ ok: false }, { status: 401 });
+  }
+  const db = adminClient();
+  const { data: jobs, error } = await db
+    .from("job_queue")
+    .select("id,kind,payload,attempts,status,source_chat")
+    .in("status", ["pending", "paused"])
+    .lte("retry_at", new Date().toISOString())
+    .order("created_at")
+    .limit(BATCH);
+  if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
+
+  const results: { id: string; status: string }[] = [];
+  for (const job of (jobs ?? []) as Job[]) {
+    // Reclamar el trabajo (evita doble ejecución si dos crons coinciden)
+    const { data: claimed } = await db
+      .from("job_queue")
+      .update({ status: "running", attempts: job.attempts + 1 })
+      .eq("id", job.id)
+      .eq("status", job.status)
+      .select("id")
+      .maybeSingle();
+    if (!claimed) continue;
+
+    const resumed = job.status === "paused";
+    try {
+      const result = await runJob(job);
+      await db.from("job_queue").update({ status: "done", result, last_error: null }).eq("id", job.id);
+      if (resumed) {
+        await log("worker", `Trabajo ${job.kind} reanudado y completado`, "info", { job: job.id });
+        if (job.source_chat) await sendMessage(job.source_chat, `▶️ Reanudé y completé la tarea pendiente (${job.kind}).`);
+      }
+      results.push({ id: job.id, status: "done" });
+    } catch (e) {
+      const attempts = job.attempts + 1;
+      const isLimit = e instanceof RateLimited;
+      const failed = !isLimit && attempts >= MAX_ATTEMPTS;
+      // Backoff exponencial: 1, 2, 4, 8… min (máx 6 h) o lo que pida el proveedor
+      const waitSec = isLimit
+        ? Math.max(e.retryAfterSec, 60 * 2 ** Math.min(attempts - 1, 8))
+        : Math.min(60 * 2 ** (attempts - 1), 6 * 3600);
+      const msg = e instanceof Error ? e.message : String(e);
+      await db
+        .from("job_queue")
+        .update({
+          status: failed ? "failed" : isLimit ? "paused" : "pending",
+          retry_at: new Date(Date.now() + waitSec * 1000).toISOString(),
+          last_error: msg,
+        })
+        .eq("id", job.id);
+      await log("worker", `Trabajo ${job.kind} ${failed ? "falló" : isLimit ? "pausado por límite de cuota" : "reintentará"}: ${msg}`, failed ? "error" : "warn", { job: job.id, waitSec });
+      results.push({ id: job.id, status: failed ? "failed" : isLimit ? "paused" : "pending" });
+    }
+  }
+  return NextResponse.json({ ok: true, processed: results.length, results });
+}
+
+export const POST = handle;
+export const GET = handle;
