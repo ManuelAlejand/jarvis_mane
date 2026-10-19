@@ -78,10 +78,11 @@ class Fallo(RuntimeError):
     pass
 
 
-def correr(args: list[str], video: dict, agente: str, etiqueta: str, timeout: int = 1800, ok_codes=(0,)) -> str:
+def correr(args: list[str], video: dict, agente: str, etiqueta: str, timeout: int = 1800, ok_codes=(0,),
+           env_extra: dict | None = None) -> str:
     """Ejecuta un script y reporta en vivo las líneas 'PROGRESO …'."""
     log(f"  → {etiqueta}: {' '.join(Path(a).name if i == 0 else a for i, a in enumerate(args))}")
-    env = {**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"}
+    env = {**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1", **(env_extra or {})}
     p = subprocess.Popen(args, cwd=RAIZ, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
                          encoding="utf-8", errors="replace", env=env)
     salida, ultimo = [], 0.0
@@ -299,7 +300,18 @@ def producir(video: dict, carpeta: Path, solo: list[int] | None = None) -> None:
     modo = video.get("modo") or "gratis"
     reportar(video["id"], estado="produciendo", agente="productor", paso="Preparando producción", fase_detalle="Preparando producción")
     if solo is None:
-        correr([PY, "scripts/generar_voz.py", str(carpeta)], video, "productor", "Voz")
+        try:
+            correr([PY, "scripts/generar_voz.py", str(carpeta)], video, "productor", "Voz")
+        except Fallo as e:
+            # Si el motor de voz se cae (p. ej. Chatterbox cierra Python en Windows), se rehace con Kokoro
+            # en un proceso nuevo para que el video no se detenga. Se rehacen todas las escenas para que la voz sea una sola.
+            if (os.environ.get("VOZ_MOTOR") or "kokoro").lower() == "kokoro":
+                raise
+            log(f"  Voz con {os.environ.get('VOZ_MOTOR')} falló; reintento con Kokoro. Detalle: {str(e)[:200]}")
+            reportar(video["id"], agente="productor", paso="Voz principal falló: usando Kokoro", fase_detalle="Voz de respaldo (Kokoro)")
+            # --forzar: todas las escenas con la misma voz (no mezclar Chatterbox y Kokoro)
+            correr([PY, "scripts/generar_voz.py", str(carpeta), "--forzar"], video, "productor", "Voz (respaldo Kokoro)",
+                   env_extra={"VOZ_MOTOR": "kokoro"})
     script_clips = "scripts/generar_clips_stock.py" if modo == "gratis" else "scripts/generar_clips.py"
     extra = ["--solo", ",".join(map(str, solo)), "--forzar"] if solo else []
     correr([PY, script_clips, str(carpeta), *extra], video, "productor", "Clips")
