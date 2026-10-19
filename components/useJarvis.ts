@@ -53,6 +53,7 @@ export function useJarvis(userId: string) {
       .on("postgres_changes", { event: "*", schema: "public", table: "tasks" }, refresh)
       .on("postgres_changes", { event: "*", schema: "public", table: "projects" }, refresh)
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "execution_logs" }, refresh)
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "api_usage" }, refresh)
       .subscribe((status) => setLive(status === "SUBSCRIBED"));
     return () => {
       db.removeChannel(channel);

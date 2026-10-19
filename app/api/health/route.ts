@@ -14,5 +14,6 @@ export async function GET() {
   } catch {
     db = false;
   }
-  return NextResponse.json({ ok: db && !missing.length, db, missing }, { status: db ? 200 : 503 });
+  const ai = !!process.env.ANTHROPIC_API_KEY;
+  return NextResponse.json({ ok: db && !missing.length, db, ai, missing }, { status: db ? 200 : 503 });
 }

@@ -1,20 +1,16 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { adminClient, log } from "@/lib/supabase/admin";
 import { sendMessage } from "@/lib/telegram";
+import { BudgetExceeded, classify, RateLimited } from "@/lib/ai";
+import { applyClassification, inbox, type Actor } from "@/lib/router";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 /**
  * Procesa la cola job_queue. Lo llama pg_cron cada 5 min (ver README).
- * Hito 2/3: soporta "notify" y deja lista la mecánica de pausa/backoff para el hito 4 (IA).
+ * Tipos: "notify" (mensaje de Telegram) y "classify" (texto libre que quedó pausado por límite de cuota).
  */
-
-class RateLimited extends Error {
-  constructor(public retryAfterSec: number) {
-    super("rate_limited");
-  }
-}
 
 type Job = {
   id: string;
@@ -37,7 +33,21 @@ async function runJob(job: Job): Promise<unknown> {
       if (!r.ok) throw new Error(r.description ?? "telegram error");
       return { sent: true };
     }
-    // case "classify": hito 4 (Haiku). Un 429 de Anthropic debe lanzar RateLimited(retry-after).
+    case "classify": {
+      const text = String(job.payload.text ?? "");
+      const actor = job.payload.actor as Actor;
+      const { data: projects } = await adminClient().from("projects").select("slug,name").order("created_at");
+      let reply;
+      try {
+        const c = await classify(text, projects ?? [], job.id);
+        reply = await applyClassification(c, text, actor);
+      } catch (e) {
+        if (!(e instanceof BudgetExceeded)) throw e; // RateLimited → vuelve a pausarse
+        reply = await inbox(text, actor, "Freno de gasto activo: lo guardé sin clasificar.");
+      }
+      if (job.source_chat) await sendMessage(job.source_chat, `▶️ Procesé tu mensaje pendiente «${text.slice(0, 60).replace(/</g, "&lt;")}»:\n\n${reply.text}`);
+      return { done: true };
+    }
     default:
       throw new Error(`Tipo de trabajo desconocido: ${job.kind}`);
   }
@@ -76,7 +86,8 @@ async function handle(req: NextRequest) {
       await db.from("job_queue").update({ status: "done", result, last_error: null }).eq("id", job.id);
       if (resumed) {
         await log("worker", `Trabajo ${job.kind} reanudado y completado`, "info", { job: job.id });
-        if (job.source_chat) await sendMessage(job.source_chat, `▶️ Reanudé y completé la tarea pendiente (${job.kind}).`);
+        if (job.source_chat && job.kind !== "classify")
+          await sendMessage(job.source_chat, `▶️ Reanudé y completé la tarea pendiente (${job.kind}).`);
       }
       results.push({ id: job.id, status: "done" });
     } catch (e) {

@@ -1,5 +1,6 @@
 import "server-only";
 import { adminClient, log } from "@/lib/supabase/admin";
+import { aiAvailable, BudgetExceeded, classify, RateLimited, type Classification } from "@/lib/ai";
 import type { Project, Task, TaskStatus } from "@/lib/types";
 import { STATUS_LABEL } from "@/lib/types";
 
@@ -14,6 +15,7 @@ export interface Actor {
   profileId: string | null;
   isAdmin: boolean;
   name?: string;
+  chatId?: number | null;
 }
 
 export interface Reply {
@@ -47,6 +49,7 @@ const HELP = [
   "/gasto — gasto de API del mes",
   "",
   "También entiendo: <i>pendientes</i>, <i>cómo va todo</i>, <i>cómo va youtube</i>, <i>gasto</i>.",
+  "Y texto libre: <i>recuérdame comprar el dominio, es urgente</i> 🧠",
 ].join("\n");
 
 export async function route(input: string, actor: Actor): Promise<Reply> {
@@ -86,7 +89,7 @@ export async function route(input: string, actor: Actor): Promise<Reply> {
       case "gasto":
         return await gasto();
       case "_inbox":
-        return await inbox(args, actor);
+        return await freeText(args, actor);
       default:
         return { text: `No conozco el comando /${esc(cmd)}.\n\n${HELP}` };
     }
@@ -233,13 +236,84 @@ async function nueva(args: string, actor: Actor, extraTags: string[] = []): Prom
   return { text: `✅ Tarea <code>#${data.ref}</code> creada en <b>${esc(project.name)}</b>\n${esc(title)}` };
 }
 
-async function inbox(text: string, actor: Actor): Promise<Reply> {
-  const r = await nueva(text.slice(0, 200), actor, ["por_clasificar"]);
+/** Sin IA disponible: el mensaje no se pierde, queda como tarea por clasificar. */
+export async function inbox(text: string, actor: Actor, note?: string): Promise<Reply> {
+  const clean = text.replace(/[#!]/g, "").slice(0, 200);
+  const r = await nueva(clean, actor, ["por_clasificar"]);
   return {
     text:
       r.text.replace("✅ Tarea", "📥 Lo guardé como tarea") +
-      "\n\n<i>Aún no interpreto texto libre (llega con el clasificador IA, hito 4). Usa /ayuda para ver comandos.</i>",
+      `\n\n<i>${note ?? "No pude interpretarlo con IA ahora. Usa /ayuda para ver comandos."}</i>`,
   };
+}
+
+/** Nivel 3: texto libre → Haiku clasifica → se ejecuta la acción equivalente. */
+async function freeText(text: string, actor: Actor): Promise<Reply> {
+  const avail = await aiAvailable();
+  if (!avail.ok) {
+    return inbox(
+      text,
+      actor,
+      avail.reason === "budget"
+        ? `Freno de gasto activo ($${avail.spent.toFixed(2)} de $${avail.limit.toFixed(2)}): este mes solo funcionan los comandos.`
+        : undefined,
+    );
+  }
+  const { data } = await adminClient().from("projects").select("slug,name").order("created_at");
+  try {
+    const c = await classify(text, data ?? []);
+    return await applyClassification(c, text, actor);
+  } catch (e) {
+    if (e instanceof RateLimited) {
+      await adminClient().from("job_queue").insert({
+        kind: "classify",
+        status: "paused",
+        payload: { text, actor },
+        source_chat: actor.chatId ?? null,
+        retry_at: new Date(Date.now() + e.retryAfterSec * 1000).toISOString(),
+        last_error: e.message,
+      });
+      await log(actor.source, "Clasificación pausada por límite de cuota; quedó en cola", "warn");
+      return { text: "⏸️ La API está en su límite de cuota. Guardé tu mensaje en la cola y te aviso aquí en cuanto lo procese." };
+    }
+    if (e instanceof BudgetExceeded) return inbox(text, actor, "Freno de gasto activo: este mes solo funcionan los comandos.");
+    await log(actor.source, `Clasificador falló: ${e instanceof Error ? e.message : e}`, "error");
+    return inbox(text, actor);
+  }
+}
+
+export async function applyClassification(c: Classification, original: string, actor: Actor): Promise<Reply> {
+  const slug = c.project_slug ? ` #${c.project_slug}` : "";
+  const title = (c.title ?? original).replace(/[#!]/g, "").replace(/\s+/g, " ").trim().slice(0, 120);
+  const prio = [1, 2, 3].includes(c.priority) ? c.priority : 2;
+  const ai = "\n\n<i>🧠 Interpretado con IA</i>";
+  let r: Reply;
+
+  switch (c.intent) {
+    case "create_task":
+      r = await nueva(`${title}${slug} !${prio}`, actor, ["ia"]);
+      break;
+    case "complex":
+      r = await nueva(`${title}${slug} !${prio}`, actor, ["para_chat"]);
+      r = { text: `${r.text}\n\nEsto requiere trabajo profundo: lo desarrollamos en el chat de Claude. Quedó marcado como <b>para_chat</b>.` };
+      break;
+    case "query_status":
+      r = await estado();
+      break;
+    case "query_tasks":
+      r = await tareas(c.project_slug ?? "");
+      break;
+    case "query_project":
+      r = await proyecto(c.project_slug ?? "");
+      break;
+    case "query_spend":
+      r = await gasto();
+      break;
+    default:
+      r = { text: esc(c.reply ?? "A la orden. Escribe /ayuda para ver lo que puedo hacer.") };
+  }
+  await log(actor.source, `IA → ${c.intent}${c.project_slug ? ` (${c.project_slug})` : ""}: "${original.slice(0, 60)}"`);
+  return { text: r.text + ai };
 }
 
 async function mover(args: string, actor: Actor): Promise<Reply> {

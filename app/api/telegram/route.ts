@@ -47,6 +47,7 @@ export async function POST(req: NextRequest) {
     profileId: user.profile_id,
     isAdmin: profile?.role === "admin",
     name: profile?.full_name ?? msg.from?.first_name,
+    chatId,
   });
   await sendMessage(chatId, reply.text);
 

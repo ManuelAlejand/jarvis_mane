@@ -22,6 +22,7 @@ pg_cron (cada 5 min) ► /api/worker ──┘   (cola job_queue, backoff 429)
    | `TELEGRAM_TOKEN` | @BotFather |
    | `TELEGRAM_WEBHOOK_SECRET` | Texto aleatorio (letras, números, `_` y `-`) |
    | `WORKER_SECRET` | Otro texto aleatorio |
+   | `ANTHROPIC_API_KEY` | platform.claude.com → API Keys (opcional: activa el texto libre) |
 
    Para generar secretos: `openssl rand -hex 24`.
 3. **Deploy.** Comprueba `https://<tu-app>.vercel.app/api/health` → `"ok": true`.
@@ -67,8 +68,23 @@ $$);
 | `/proyecto [nombre]` | Lista o detalle de proyectos |
 | `/gasto` | Gasto de API del mes frente al tope |
 
-Atajos de texto: *pendientes*, *cómo va todo*, *cómo va youtube*, *gasto*.
-Cualquier otro texto se guarda como tarea con la etiqueta `por_clasificar` (el clasificador IA llega en el hito 4).
+Atajos de texto (0 tokens): *pendientes*, *cómo va todo*, *cómo va youtube*, *gasto*.
+
+## Texto libre con IA (hito 4)
+
+Lo que no es comando ni atajo lo clasifica **Claude Haiku 5.5** (`lib/ai.ts`) en una intención:
+crear tarea, consultar estado/tareas/proyecto/gasto, tarea compleja (`para_chat`) o saludo.
+
+- **Costo:** sin *thinking*, esfuerzo `low`, salida JSON por esquema, máx. 300 tokens y prompt de sistema cacheado.
+  Aprox. 0.0002 USD por mensaje.
+- **Freno de gasto:** antes de cada llamada se suma `api_usage` del mes; si llega a `api_soft_limit_usd` (4.50)
+  solo funcionan comandos y atajos, y el texto se guarda como tarea `por_clasificar`.
+- **Límite de cuota (429/529):** el mensaje entra a `job_queue` en pausa con backoff; el worker lo reintenta
+  y avisa por Telegram al completarlo.
+- **Interruptor:** `update settings set value = 'false' where key = 'ai_enabled';` apaga la IA sin redesplegar.
+- Precios por modelo en `settings.model_prices` (USD por millón de tokens).
+
+Configura también un **tope mensual en la consola de Anthropic** (Settings → Limits) como segunda barrera.
 
 ## Desarrollo local
 
