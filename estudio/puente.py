@@ -171,7 +171,7 @@ FORMATO OBLIGATORIO: YouTube Short — este encargo reemplaza las reglas de vide
 - "formato": "short", "aspect_ratio": "9:16", idioma = "{idea.get('idioma', 'es')}".
 - Duración total entre 30 y 55 segundos: 5 a 9 escenas de 5 s (usa 10 s solo si la narración lo exige).
 - Narración: máximo 12 palabras por escena de 5 s. Gancho potente en la primera escena, sin saludos.
-- Producción en MODO GRATIS: los visuales serán clips de stock de Pexels, no video generado.
+- Producción en MODO GRATIS: los visuales serán clips de stock (Pixabay), no video generado.
   Por eso cada escena debe incluir "busqueda_stock": 2 a 4 palabras en inglés, concretas y fáciles de encontrar
   en stock (ej. "deep ocean dark water", "ancient ruins aerial"). Evita rostros concretos y escenas imposibles.
   Mantén igualmente "prompt_visual" (requerido por el esquema).
@@ -192,8 +192,8 @@ def instrucciones_validador(carpeta: Path) -> str:
     return f"""Actúa como el subagente `validador` definido en .claude/agents/validador.md (usa la herramienta Agent/Task con subagent_type "validador" si está disponible; si no, sigue tú mismo ese archivo).
 
 Proyecto (ruta absoluta): {carpeta}
-Es un YouTube Short (9:16, menos de 60 s) producido en modo gratis: los visuales son clips de stock de Pexels
-(registrados en clips/stock.json, licencia libre con uso comercial) y la voz es Kokoro (sintética, licencia Apache-2.0).
+Es un YouTube Short (9:16, menos de 60 s) producido en modo gratis: los visuales son clips de stock de Pixabay o Pexels
+(registrados en clips/stock.json, licencias libres con uso comercial) y la voz es Kokoro (sintética, licencia Apache-2.0).
 No penalices que los clips sean de stock; sí revisa que encajen con la narración, que no muestren marcas,
 logos, texto legible ajeno ni personas reconocibles, y que el conjunto aporte valor original.
 Ejecuta las validaciones automáticas (python scripts/validar_guion.py ... y python scripts/validar_video.py "{carpeta}" --fotogramas 6),
@@ -391,7 +391,9 @@ def probar() -> None:
     chequeo("TELEGRAM_TOKEN en .env", bool(TG_TOKEN), "pega el token del bot para recibir los videos")
     chequeo("ffmpeg instalado", bool(shutil.which("ffmpeg")), "instálalo: winget install Gyan.FFmpeg")
     chequeo("Claude Code instalado", bool(os.environ.get("CLAUDE_CMD") or shutil.which("claude")), "ver README: Instalación en Windows")
-    chequeo("PEXELS_API_KEY en .env", bool(os.environ.get("PEXELS_API_KEY")), "gratis en pexels.com/api")
+    prov = (os.environ.get("STOCK_PROVEEDOR") or "pixabay").lower()
+    chequeo(f"Llave de stock ({prov}) en .env", bool(os.environ.get(f"{prov.upper()}_API_KEY")),
+            "crea una cuenta en pixabay.com y copia tu llave de pixabay.com/api/docs a PIXABAY_API_KEY")
     try:
         import kokoro  # noqa: F401, PLC0415
         chequeo("Kokoro (voz) instalado", True)

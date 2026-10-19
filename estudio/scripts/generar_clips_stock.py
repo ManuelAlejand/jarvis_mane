@@ -1,12 +1,20 @@
-"""Modo gratis: un clip de stock vertical por escena desde Pexels (licencia libre, uso comercial).
+"""Modo gratis: un clip de stock por escena (licencia libre con uso comercial).
 
 Uso: python scripts/generar_clips_stock.py proyectos/<id> [--solo 3,4] [--forzar]
-Salida: clips/escena_XX.mp4 y clips/stock.json (qué clip de Pexels se usó en cada escena).
-Necesita PEXELS_API_KEY en .env (gratis en pexels.com/api).
+Salida: clips/escena_XX.mp4 y clips/stock.json (qué clip se usó en cada escena y de dónde).
+
+Proveedor según STOCK_PROVEEDOR en .env:
+  pixabay (por defecto) PIXABAY_API_KEY — gratis: crea una cuenta en pixabay.com y la llave
+                        aparece en pixabay.com/api/docs. Licencia Pixabay: uso comercial, sin atribución.
+  pexels                PEXELS_API_KEY  — licencia Pexels: uso comercial, sin atribución.
 
 Búsqueda por escena: `busqueda_stock` (inglés) → palabras clave de la idea → inicio de `prompt_visual`.
+Prefiere clips verticales; si no hay, usa horizontales y el montaje los recorta a 9:16.
 No repite un mismo clip dentro del video; con --forzar elige otro distinto al anterior.
+Las búsquedas se guardan 24 h en cache/ (lo exige Pixabay y ahorra cuota).
 """
+import hashlib
+import json
 import re
 import sys
 import time
@@ -15,39 +23,98 @@ from pathlib import Path
 import requests
 
 sys.path.insert(0, str(Path(__file__).parent))
-from comun import (carpeta_proyecto, env, escribir_json, leer_json,  # noqa: E402
+from comun import (RAIZ, carpeta_proyecto, env, escribir_json, leer_json,  # noqa: E402
                    nombre_escena, registrar_produccion)
 
-API = env("PEXELS_API_URL", "https://api.pexels.com/videos/search")  # se puede cambiar para pruebas
+CACHE = RAIZ / "cache" / "stock"
+MAX_MB = 120  # no descargar archivos enormes (4K largos)
 
 
-def buscar(clave: str, consulta: str, orientacion: str, pagina: int = 1) -> list[dict]:
+# ------------------------------------------------------------------ proveedores
+# Cada uno devuelve candidatos normalizados:
+# {"id", "duracion", "pagina", "autor", "archivos": [{"url", "w", "h", "mb"}]}
+
+def _get(url: str, **kw) -> requests.Response:
     for intento in range(4):
-        r = requests.get(
-            API,
-            headers={"Authorization": clave},
-            params={"query": consulta, "orientation": orientacion, "size": "medium", "per_page": 15, "page": pagina},
-            timeout=30,
-        )
-        if r.status_code == 200:
-            return r.json().get("videos", [])
+        r = requests.get(url, timeout=30, **kw)
         if r.status_code == 429:
-            time.sleep(10 * (intento + 1))
+            time.sleep(15 * (intento + 1))
             continue
-        raise RuntimeError(f"Pexels {r.status_code}: {r.text[:300]}")
-    raise RuntimeError("Pexels: demasiados reintentos (límite de la API)")
+        return r
+    raise RuntimeError("Límite de la API de stock alcanzado; reintenta en unos minutos")
 
 
-def mejor_archivo(video: dict, vertical: bool) -> dict | None:
-    """El archivo mp4 más cercano a 1080 px en el lado corto, sin pasar de 4K."""
-    candidatos = [f for f in video.get("video_files", []) if f.get("file_type") == "video/mp4" and f.get("width") and f.get("height")]
-    if vertical:
-        candidatos = [f for f in candidatos if f["height"] >= f["width"]] or candidatos
-    candidatos = [f for f in candidatos if min(f["width"], f["height"]) >= 720 and max(f["width"], f["height"]) <= 3840] or candidatos
-    if not candidatos:
+def _cache(clave: str, cargar):
+    CACHE.mkdir(parents=True, exist_ok=True)
+    ruta = CACHE / (hashlib.sha1(clave.encode()).hexdigest() + ".json")
+    if ruta.exists() and time.time() - ruta.stat().st_mtime < 24 * 3600:
+        return json.loads(ruta.read_text(encoding="utf-8"))
+    datos = cargar()
+    ruta.write_text(json.dumps(datos), encoding="utf-8")
+    return datos
+
+
+def buscar_pixabay(consulta: str, vertical: bool) -> list[dict]:
+    clave = env("PIXABAY_API_KEY", requerido=True)
+    url = env("PIXABAY_API_URL", "https://pixabay.com/api/videos/")
+
+    def cargar():
+        r = _get(url, params={"key": clave, "q": consulta[:100], "video_type": "film", "safesearch": "true",
+                              "per_page": 50, "min_height": 720})
+        if r.status_code != 200:
+            raise RuntimeError(f"Pixabay {r.status_code}: {r.text[:300]}")
+        return r.json().get("hits", [])
+
+    hits = _cache(f"pixabay|{consulta}", cargar)
+    out = []
+    for h in hits:
+        archivos = [{"url": v["url"], "w": v["width"], "h": v["height"], "mb": (v.get("size") or 0) / 1e6}
+                    for v in (h.get("videos") or {}).values() if v.get("url") and v.get("width")]
+        out.append({"id": f"pixabay-{h['id']}", "duracion": h.get("duration", 0), "pagina": h.get("pageURL"),
+                    "autor": h.get("user"), "archivos": archivos})
+    # Primero los verticales (si los hay), luego el resto
+    return sorted(out, key=lambda c: 0 if any(a["h"] > a["w"] for a in c["archivos"]) == vertical else 1)
+
+
+def buscar_pexels(consulta: str, vertical: bool) -> list[dict]:
+    clave = env("PEXELS_API_KEY", requerido=True)
+    url = env("PEXELS_API_URL", "https://api.pexels.com/videos/search")
+    out = []
+    for orient in (("portrait", "landscape") if vertical else ("landscape",)):
+        def cargar(o=orient):
+            r = _get(url, headers={"Authorization": clave},
+                     params={"query": consulta, "orientation": o, "size": "medium", "per_page": 15})
+            if r.status_code != 200:
+                raise RuntimeError(f"Pexels {r.status_code}: {r.text[:300]}")
+            return r.json().get("videos", [])
+        for v in _cache(f"pexels|{orient}|{consulta}", cargar):
+            archivos = [{"url": f["link"], "w": f["width"], "h": f["height"], "mb": 0}
+                        for f in v.get("video_files", []) if f.get("file_type") == "video/mp4" and f.get("width")]
+            out.append({"id": f"pexels-{v['id']}", "duracion": v.get("duration", 0), "pagina": v.get("url"),
+                        "autor": (v.get("user") or {}).get("name"), "archivos": archivos})
+    return out
+
+
+PROVEEDORES = {"pixabay": buscar_pixabay, "pexels": buscar_pexels}
+LICENCIA = {"pixabay": "Pixabay Content License (uso comercial, sin atribución obligatoria)",
+            "pexels": "Pexels License (uso comercial, sin atribución obligatoria)"}
+
+
+def mejor_archivo(c: dict, vertical: bool) -> dict | None:
+    """El archivo más cercano a 1080 px de ancho útil en 9:16 (o alto en 16:9), sin pasar de MAX_MB."""
+    archivos = [a for a in c["archivos"] if not a["mb"] or a["mb"] <= MAX_MB]
+    if not archivos:
         return None
-    return min(candidatos, key=lambda f: abs(min(f["width"], f["height"]) - 1080))
+    if vertical:
+        verticales = [a for a in archivos if a["h"] >= a["w"]]
+        if verticales:
+            return min(verticales, key=lambda a: abs(a["w"] - 1080))
+        # Horizontal recortado a 9:16: el ancho útil es alto * 9/16; buscamos ~1080 px
+        return min(archivos, key=lambda a: abs(a["h"] * 9 / 16 - 1080) + (0 if a["h"] * 9 / 16 >= 600 else 5000))
+    return min(archivos, key=lambda a: abs(a["h"] - 1080))
 
+
+# ------------------------------------------------------------------ búsqueda por escena
 
 def consultas(g: dict, e: dict, idea: dict) -> list[str]:
     out = []
@@ -56,11 +123,10 @@ def consultas(g: dict, e: dict, idea: dict) -> list[str]:
     kws = idea.get("palabras_clave") or []
     if kws:
         out.append(" ".join(kws[:2]))
+        out.append(kws[0])
     pv = re.sub(r"[^A-Za-z ]", " ", e.get("prompt_visual", "")).split()
     if pv:
         out.append(" ".join(pv[:4]))
-    if g.get("nicho"):
-        out.append(str(g["nicho"]))
     vistos, limpias = set(), []
     for c in out:
         c = " ".join(c.split())[:80]
@@ -71,7 +137,7 @@ def consultas(g: dict, e: dict, idea: dict) -> list[str]:
 
 
 def descargar(url: str, destino: Path) -> None:
-    with requests.get(url, stream=True, timeout=120) as r:
+    with requests.get(url, stream=True, timeout=180) as r:
         r.raise_for_status()
         tmp = destino.with_suffix(".part")
         with open(tmp, "wb") as f:
@@ -89,17 +155,19 @@ def main() -> None:
     if "--solo" in sys.argv:
         solo = {int(x) for x in sys.argv[sys.argv.index("--solo") + 1].split(",")}
 
-    clave = env("PEXELS_API_KEY", requerido=True)
+    proveedor = (env("STOCK_PROVEEDOR", "pixabay") or "pixabay").lower()
+    buscar = PROVEEDORES.get(proveedor)
+    if not buscar:
+        sys.exit(f"ERROR: STOCK_PROVEEDOR desconocido: {proveedor} (usa pixabay o pexels)")
     g = leer_json(proyecto / "guion.json")
     idea = leer_json(proyecto / "nicho.json").get("idea", {}) if (proyecto / "nicho.json").exists() else {}
     vertical = g.get("aspect_ratio") == "9:16"
-    orientacion = "portrait" if vertical else "landscape"
 
     clips = proyecto / "clips"
     clips.mkdir(exist_ok=True)
     ruta_reg = clips / "stock.json"
     registro = leer_json(ruta_reg) if ruta_reg.exists() else {}
-    usados = {v["pexels_id"] for v in registro.values()}
+    usados = {v["id"] for v in registro.values() if "id" in v}
 
     total = len(g["escenas"])
     faltan = []
@@ -109,39 +177,32 @@ def main() -> None:
         destino = clips / f"{nombre_escena(e['n'])}.mp4"
         if destino.exists() and not forzar:
             continue
-        anterior = registro.get(str(e["n"]), {}).get("pexels_id")
+        anterior = registro.get(str(e["n"]), {}).get("id")
         print(f"PROGRESO Clips {i}/{total}", flush=True)
         elegido = None
         for consulta in consultas(g, e, idea):
-            for orient in (orientacion, None):  # si no hay vertical, se acepta horizontal y se recorta
-                for v in buscar(clave, consulta, orient or "landscape"):
-                    if v["id"] in usados or v["id"] == anterior:
-                        continue
-                    if v.get("duration", 0) < min(e["duracion_seg"], 4):
-                        continue
-                    f = mejor_archivo(v, vertical)
-                    if f:
-                        elegido = (v, f, consulta)
-                        break
-                if elegido:
+            for c in buscar(consulta, vertical):
+                if c["id"] in usados or c["id"] == anterior or c["duracion"] < min(e["duracion_seg"], 4):
+                    continue
+                a = mejor_archivo(c, vertical)
+                if a:
+                    elegido = (c, a, consulta)
                     break
             if elegido:
                 break
         if not elegido:
-            print(f"  escena {e['n']}: sin clip en Pexels", flush=True)
+            print(f"  escena {e['n']}: sin clip de stock", flush=True)
             faltan.append(e["n"])
             continue
-        v, f, consulta = elegido
-        descargar(f["link"], destino)
-        usados.add(v["id"])
-        registro[str(e["n"])] = {
-            "pexels_id": v["id"], "url": v.get("url"), "autor": (v.get("user") or {}).get("name"),
-            "consulta": consulta, "resolucion": f"{f['width']}x{f['height']}",
-        }
+        c, a, consulta = elegido
+        descargar(a["url"], destino)
+        usados.add(c["id"])
+        registro[str(e["n"])] = {"id": c["id"], "proveedor": proveedor, "url": c["pagina"], "autor": c["autor"],
+                                 "consulta": consulta, "resolucion": f"{a['w']}x{a['h']}"}
         escribir_json(ruta_reg, registro)
-        print(f"  escena {e['n']}: «{consulta}» → pexels {v['id']} ({f['width']}x{f['height']})", flush=True)
+        print(f"  escena {e['n']}: «{consulta}» → {c['id']} ({a['w']}x{a['h']})", flush=True)
 
-    registrar_produccion(proyecto, "clips", {"motor": "pexels", "faltantes": faltan, "licencia": "Pexels License (uso comercial, sin atribución obligatoria)"})
+    registrar_produccion(proyecto, "clips", {"motor": proveedor, "faltantes": faltan, "licencia": LICENCIA[proveedor]})
     if faltan:
         print(f"FALTAN clips de las escenas: {faltan}")
         sys.exit(1)

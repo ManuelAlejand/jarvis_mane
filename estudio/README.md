@@ -1,7 +1,7 @@
 # Estudio YouTube IA
 
 > **Conectado a JARVIS.** Pides ideas por Telegram, eliges cuáles producir con botones, y este PC
-> hace el resto con `puente.py`: guion (Claude Code con tu plan Pro) → voz Kokoro + clips de Pexels
+> hace el resto con `puente.py`: guion (Claude Code con tu plan Pro) → voz Kokoro + clips de stock de Pixabay
 > → validación → te llega el Short por Telegram con **Publicar / Cambiar / Descartar**.
 > Modo por defecto: **gratis** (0 USD por video).
 
@@ -29,8 +29,8 @@ copy .env.example .env
 notepad .env
 ```
 
-En `.env` completa `WORKER_SECRET` y `TELEGRAM_TOKEN` (los mismos de Vercel) y `PEXELS_API_KEY`
-(gratis en pexels.com/api). Luego:
+En `.env` completa `WORKER_SECRET` y `TELEGRAM_TOKEN` (los mismos de Vercel) y `PIXABAY_API_KEY`
+(crea una cuenta gratis en pixabay.com; la llave aparece en pixabay.com/api/docs). Luego:
 
 ```powershell
 python puente.py --probar     # revisa que todo esté listo
@@ -48,7 +48,7 @@ más abajo y ejecuta `python scripts/autorizar_youtube.py` una vez.
 | Ideas | Investigador (Sonnet) | Servidor JARVIS (API) | ~0.02 USD |
 | Guion | Guionista | Claude Code en este PC (plan Pro) | 0 |
 | Voz | Kokoro-82M (Apache-2.0, uso comercial) | Este PC | 0 |
-| Clips | Pexels (licencia libre, uso comercial) | Este PC | 0 |
+| Clips | Pixabay o Pexels (licencias libres, uso comercial) | Este PC | 0 |
 | Montaje y subtítulos | ffmpeg | Este PC | 0 |
 | Validación (máx. 2 rondas de corrección) | Validador | Claude Code en este PC | 0 |
 | Publicar en privado | Publicador | YouTube API desde este PC | 0 |
