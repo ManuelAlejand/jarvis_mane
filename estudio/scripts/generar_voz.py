@@ -15,6 +15,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 from comun import (carpeta_proyecto, duracion, env, ffmpeg, leer_json,  # noqa: E402
                    nombre_escena, registrar_produccion)
+from texto_narracion import preparar  # noqa: E402 — "1,000" → "mil", "40 %" → "cuarenta por ciento"
 
 # Código de idioma de Kokoro y voz por defecto (masculina) para cada idioma del guion
 KOKORO_IDIOMA = {"es": "e", "en": "a", "pt": "p"}
@@ -85,7 +86,7 @@ def main() -> None:
     total = len(g["escenas"])
     for i, e in enumerate(g["escenas"], 1):
         destino = salida / f"{nombre_escena(e['n'])}.mp3"
-        texto = e["narracion"].strip()
+        texto = preparar(e["narracion"].strip(), idioma) if e["narracion"].strip() else ""
         if not texto:
             resumen.append({"n": e["n"], "estado": "sin_narracion"})
             continue

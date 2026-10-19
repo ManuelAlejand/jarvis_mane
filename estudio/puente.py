@@ -248,6 +248,7 @@ FORMATO OBLIGATORIO: YouTube Short — este encargo reemplaza las reglas de vide
 - "formato": "short", "aspect_ratio": "9:16", idioma = "{idea.get('idioma', 'es')}".
 - Duración total entre 30 y 55 segundos: 5 a 9 escenas de 5 s (usa 10 s solo si la narración lo exige).
 - Narración: máximo 12 palabras por escena de 5 s. Gancho potente en la primera escena, sin saludos.
+  Escribe la narración como se dice en voz alta: números en palabras ("mil metros", no "1,000 m"), sin siglas raras ni símbolos.
 - Producción en MODO GRATIS: los visuales serán clips de stock (Pixabay), no video generado.
   Por eso cada escena debe incluir "busqueda_stock": 2 a 4 palabras en inglés, concretas y fáciles de encontrar
   en stock (ej. "deep ocean dark water", "ancient ruins aerial"). Evita rostros concretos y escenas imposibles.
