@@ -1,7 +1,7 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { browserClient } from "@/lib/supabase/browser";
-import type { AgentRow, AgentRun, LogRow, Project, Task } from "@/lib/types";
+import type { AgentRow, AgentRun, LogRow, Project, Task, VideoRow } from "@/lib/types";
 
 export interface Profile {
   id: string;
@@ -18,6 +18,8 @@ export function useJarvis(userId: string) {
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [agents, setAgents] = useState<AgentRow[]>([]);
   const [runs, setRuns] = useState<AgentRun[]>([]);
+  const [videos, setVideos] = useState<VideoRow[]>([]);
+  const [heartbeat, setHeartbeat] = useState<string | null>(null);
   const [spend, setSpend] = useState({ spent: 0, budget: 5 });
   const [loading, setLoading] = useState(true);
   const [live, setLive] = useState(false);
@@ -25,7 +27,7 @@ export function useJarvis(userId: string) {
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const load = useCallback(async () => {
-    const [p, t, l, pr, s, b, ag, rn] = await Promise.all([
+    const [p, t, l, pr, s, b, ag, rn, vd, hb] = await Promise.all([
       db.from("projects").select("*").order("created_at"),
       db.from("tasks").select("*").order("position").order("ref"),
       db.from("execution_logs").select("id,level,source,message,created_at").order("created_at", { ascending: false }).limit(60),
@@ -33,8 +35,12 @@ export function useJarvis(userId: string) {
       db.from("api_spend_month").select("spent_usd").maybeSingle(),
       db.from("settings").select("value").eq("key", "api_budget_usd").maybeSingle(),
       db.from("agents").select("id,slug,name,role,color,project_id,description,enabled,status,runtime,model,position,current_run_id,last_summary,last_run_at").order("position"),
-      db.from("agent_runs").select("id,agent_id,status,input,current_step,output,summary,verdict,cost_usd,source,error,created_at,started_at,finished_at").order("created_at", { ascending: false }).limit(60),
+      db.from("agent_runs").select("id,agent_id,status,input,current_step,output,summary,verdict,cost_usd,source,error,created_at,started_at,finished_at,result").order("created_at", { ascending: false }).limit(60),
+      db.from("videos").select("id,ref,titulo,estado,fase_detalle,modo,intentos,veredicto,duracion_seg,costo_estimado_usd,youtube_url,error,idea,created_at,updated_at").order("created_at", { ascending: false }).limit(40),
+      db.from("settings").select("value").eq("key", "studio_heartbeat").maybeSingle(),
     ]);
+    setVideos((vd.data ?? []) as VideoRow[]);
+    setHeartbeat((hb.data?.value as { at?: string } | null)?.at ?? null);
     setAgents((ag.data ?? []) as AgentRow[]);
     setRuns((rn.data ?? []) as AgentRun[]);
     const firstErr = [p, t, l, pr].find((r) => r.error)?.error;
@@ -62,6 +68,7 @@ export function useJarvis(userId: string) {
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "api_usage" }, refresh)
       .on("postgres_changes", { event: "*", schema: "public", table: "agents" }, refresh)
       .on("postgres_changes", { event: "*", schema: "public", table: "agent_runs" }, refresh)
+      .on("postgres_changes", { event: "*", schema: "public", table: "videos" }, refresh)
       .subscribe((status) => setLive(status === "SUBSCRIBED"));
     return () => {
       db.removeChannel(channel);
@@ -105,7 +112,7 @@ export function useJarvis(userId: string) {
     [db, load],
   );
 
-  return { projects, tasks, logs, profiles, agents, runs, spend, loading, live, error, setError, me, updateTask, createTask, setAgentEnabled, reload: load };
+  return { projects, tasks, logs, profiles, agents, runs, videos, heartbeat, spend, loading, live, error, setError, me, updateTask, createTask, setAgentEnabled, reload: load };
 }
 
 export type JarvisState = ReturnType<typeof useJarvis>;

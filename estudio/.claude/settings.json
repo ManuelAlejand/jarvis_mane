@@ -1,0 +1,16 @@
+{
+  "enableAllProjectMcpServers": true,
+  "permissions": {
+    "allow": [
+      "Bash(python scripts/*)",
+      "Bash(ffmpeg:*)",
+      "Bash(ffprobe:*)",
+      "WebSearch",
+      "WebFetch"
+    ],
+    "ask": [
+      "mcp__youtube__subir_video",
+      "mcp__youtube__subir_miniatura"
+    ]
+  }
+}

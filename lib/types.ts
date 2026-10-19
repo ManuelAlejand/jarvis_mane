@@ -69,7 +69,40 @@ export interface AgentRun {
   created_at: string;
   started_at: string | null;
   finished_at: string | null;
+  result: { ideas?: { titulo: string; gancho: string; angulo: string }[]; selected?: number[]; sent?: boolean; nicho?: string } | null;
 }
+
+export interface VideoRow {
+  id: string;
+  ref: number;
+  titulo: string;
+  estado: string;
+  fase_detalle: string | null;
+  modo: string;
+  intentos: number;
+  veredicto: string | null;
+  duracion_seg: number | null;
+  costo_estimado_usd: number | null;
+  youtube_url: string | null;
+  error: string | null;
+  idea: { nicho?: string; idioma?: string; gancho?: string } | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export const VIDEO_ESTADO: Record<string, string> = {
+  guion_pendiente: "En cola para el guion",
+  guionando: "Escribiendo el guion",
+  cambios: "Aplicando tus cambios",
+  produciendo: "Produciendo el video",
+  validando: "Validando",
+  revision: "Listo para que lo revises",
+  publicar: "En cola para subir",
+  publicando: "Subiendo a YouTube",
+  publicado: "Subido en privado",
+  descartado: "Descartado",
+  error: "Error",
+};
 
 export const STATUS_LABEL: Record<TaskStatus, string> = {
   backlog: "Backlog",

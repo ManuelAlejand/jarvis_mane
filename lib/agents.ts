@@ -3,6 +3,7 @@ import { after } from "next/server";
 import { adminClient, log } from "@/lib/supabase/admin";
 import { BudgetExceeded, callClaude, RateLimited } from "@/lib/ai";
 import { sendMessage } from "@/lib/telegram";
+import { INVESTIGADOR_PROMPT, INVESTIGADOR_SCHEMA, renderInvestigacion, sendIdeas, type Investigacion } from "@/lib/studio";
 
 /**
  * Agentes: miembros "virtuales" del equipo con nombre, rol y estado visible en el dashboard.
@@ -138,24 +139,39 @@ export async function executeRun(runId: string): Promise<"done" | "paused" | "er
 
     await db.from("agent_runs").update({ current_step: `Trabajando en: ${claimed.input.slice(0, 80)}` }).eq("id", runId);
 
+    const structured = agent.slug === "investigador";
     const { text, cost } = await callClaude({
       model: agent.model,
-      system: agent.system_prompt,
-      maxTokens: agent.max_tokens,
+      system: structured ? INVESTIGADOR_PROMPT : agent.system_prompt,
+      maxTokens: Math.max(agent.max_tokens, structured ? 2000 : 0),
+      schema: structured ? INVESTIGADOR_SCHEMA : undefined,
       agentRunId: runId,
       user: `${context ? `${context}\n\n` : ""}Orden:\n${claimed.input}`,
     });
 
-    const m = text.match(/^\s*Resumen:\s*(.+)$/im);
-    const summary = (m?.[1] ?? text.replace(/[#*_`>|-]/g, " ").replace(/\s+/g, " ").slice(0, 100)).trim().slice(0, 140);
-    const output = text.replace(/^\s*Resumen:.*$/im, "").trim();
+    let output: string;
+    let summary: string;
+    let result: Investigacion | null = null;
+    if (structured) {
+      result = JSON.parse(text) as Investigacion;
+      result.ideas = (result.ideas ?? []).slice(0, 8);
+      result.selected = [];
+      output = renderInvestigacion(result);
+      summary = (result.resumen || `${result.ideas.length} ideas de ${result.nicho}`).slice(0, 140);
+    } else {
+      const m = text.match(/^\s*Resumen:\s*(.+)$/im);
+      summary = (m?.[1] ?? text.replace(/[#*_`>|-]/g, " ").replace(/\s+/g, " ").slice(0, 100)).trim().slice(0, 140);
+      output = text.replace(/^\s*Resumen:.*$/im, "").trim();
+    }
     const now = new Date().toISOString();
 
-    await db.from("agent_runs").update({ status: "done", output, summary, cost_usd: cost, finished_at: now, current_step: null }).eq("id", runId);
+    await db.from("agent_runs").update({ status: "done", output, summary, result, cost_usd: cost, finished_at: now, current_step: null }).eq("id", runId);
     await setAgent(agent.id, { last_summary: summary, last_run_at: now });
     await log("agent", `${agent.name} terminó: ${summary}`, "info", { agent: agent.slug, run: runId, cost });
 
-    if (claimed.source_chat) {
+    if (claimed.source_chat && result) {
+      await sendIdeas(claimed.source_chat, runId, result);
+    } else if (claimed.source_chat) {
       await sendMessage(
         claimed.source_chat,
         `✅ <b>${esc(agent.name)}</b> terminó\n\n${esc(output).slice(0, 3500)}${output.length > 3500 ? "\n\n…(completo en el dashboard)" : ""}`,

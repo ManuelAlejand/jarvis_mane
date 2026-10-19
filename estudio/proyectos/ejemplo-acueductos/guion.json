@@ -1,0 +1,38 @@
+{
+  "id": "ejemplo-acueductos",
+  "titulo": "Cómo los romanos movieron agua 90 km sin una sola bomba",
+  "idioma": "es",
+  "mercado": ["US", "ES", "MX"],
+  "nicho": "Historias de ingeniería antigua",
+  "formato": "largo",
+  "aspect_ratio": "16:9",
+  "gancho": "Sin electricidad ni bombas, Roma llevaba un millón de litros de agua por hora a la ciudad. El truco cabía en una regla de piedra.",
+  "aporte_original": "En lugar de repetir la lista de acueductos famosos, el video reconstruye paso a paso cómo un ingeniero romano calculaba la pendiente con el chorobates y explica por qué un error de pocos centímetros arruinaba kilómetros de obra.",
+  "estilo_visual": "cinematic, realistic, natural light, 35mm film look",
+  "personajes": [
+    {
+      "id": "ingeniero",
+      "rol": "personaje recurrente",
+      "descripcion_visual": "Middle-aged Roman engineer with short grey beard, dusty beige wool tunic, leather belt with bronze tools"
+    }
+  ],
+  "escenas": [
+    {"n": 1, "narracion": "Sin bombas ni motores, Roma recibía un río artificial cada día.", "personaje": null, "prompt_visual": "Aerial view of a long stone Roman aqueduct crossing a green valley at sunrise, slow drone push forward, golden light", "duracion_seg": 5},
+    {"n": 2, "narracion": "El secreto no era la fuerza. Era una pendiente casi invisible.", "personaje": "ingeniero", "prompt_visual": "Middle-aged Roman engineer with short grey beard, dusty beige wool tunic, leather belt with bronze tools, kneeling and looking along a stone channel, close-up, shallow depth of field", "duracion_seg": 5},
+    {"n": 3, "narracion": "Para medirla usaban el chorobates, una mesa de madera de seis metros con un canal de agua encima.", "personaje": "ingeniero", "prompt_visual": "Middle-aged Roman engineer with short grey beard, dusty beige wool tunic, leather belt with bronze tools, adjusting a long wooden leveling table on a hillside, medium shot, slow pan", "duracion_seg": 10},
+    {"n": 4, "narracion": "Si el agua del canal quedaba quieta, la mesa estaba nivelada.", "personaje": null, "prompt_visual": "Macro shot of still water in a narrow wooden groove reflecting the sky, gentle breeze, soft light", "duracion_seg": 5},
+    {"n": 5, "narracion": "Un error de pocos centímetros por kilómetro bastaba para que el agua se estancara o destruyera el canal.", "personaje": null, "prompt_visual": "Water overflowing a cracked stone channel on a hillside, dramatic slow motion, overcast light", "duracion_seg": 5},
+    {"n": 6, "narracion": "Por eso, en el próximo video, veremos el acueducto que tardó cuarenta años en terminarse.", "personaje": null, "prompt_visual": "Ruins of a tall Roman aqueduct arcade at dusk, slow dolly out, warm sky", "duracion_seg": 5}
+  ],
+  "clips_short": [
+    {"desde_escena": 3, "hasta_escena": 5, "titulo": "La regla de piedra que construyó Roma"}
+  ],
+  "metadatos": {
+    "titulo_youtube": "Cómo Roma movió agua 90 km sin una sola bomba",
+    "descripcion": "Reconstruimos cómo los ingenieros romanos calculaban la pendiente de sus acueductos con el chorobates.\n\nFuentes: Vitruvio, De Architectura, Libro VIII.\n\nImágenes generadas con IA con fines ilustrativos.",
+    "tags": ["roma", "acueductos", "ingeniería antigua", "historia", "chorobates"],
+    "categoria_id": "27"
+  },
+  "divulgacion_ia": true,
+  "fuentes": [{"titulo": "Vitruvio, De Architectura, Libro VIII", "url": "https://penelope.uchicago.edu/Thayer/E/Roman/Texts/Vitruvius/8*.html"}]
+}

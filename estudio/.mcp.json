@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "youtube": {
+      "command": "python",
+      "args": ["servidores/youtube_server.py"],
+      "env": {}
+    }
+  }
+}

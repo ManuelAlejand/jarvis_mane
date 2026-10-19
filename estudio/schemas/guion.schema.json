@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Guion de video",
+  "type": "object",
+  "required": ["id", "titulo", "idioma", "nicho", "formato", "aspect_ratio", "gancho",
+               "aporte_original", "personajes", "escenas", "metadatos", "divulgacion_ia", "fuentes"],
+  "properties": {
+    "id": {"type": "string", "minLength": 3},
+    "titulo": {"type": "string", "minLength": 5},
+    "idioma": {"type": "string", "enum": ["es", "en", "pt"]},
+    "mercado": {"type": "array", "items": {"type": "string"}},
+    "nicho": {"type": "string"},
+    "formato": {"type": "string", "enum": ["largo", "short"]},
+    "aspect_ratio": {"type": "string", "enum": ["16:9", "9:16"]},
+    "gancho": {"type": "string", "minLength": 10},
+    "aporte_original": {"type": "string", "minLength": 40},
+    "estilo_visual": {"type": "string"},
+    "personajes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "descripcion_visual"],
+        "properties": {
+          "id": {"type": "string"},
+          "rol": {"type": "string"},
+          "descripcion_visual": {"type": "string", "minLength": 20},
+          "voz_id": {"type": "string"}
+        }
+      }
+    },
+    "escenas": {
+      "type": "array",
+      "minItems": 3,
+      "items": {
+        "type": "object",
+        "required": ["n", "narracion", "prompt_visual", "duracion_seg"],
+        "properties": {
+          "n": {"type": "integer", "minimum": 1},
+          "narracion": {"type": "string"},
+          "personaje": {"type": ["string", "null"]},
+          "prompt_visual": {"type": "string", "minLength": 20},
+          "prompt_negativo": {"type": "string"},
+          "duracion_seg": {"type": "integer", "enum": [5, 10]},
+          "notas_edicion": {"type": "string"}
+        }
+      }
+    },
+    "clips_short": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["desde_escena", "hasta_escena", "titulo"],
+        "properties": {
+          "desde_escena": {"type": "integer"},
+          "hasta_escena": {"type": "integer"},
+          "titulo": {"type": "string"}
+        }
+      }
+    },
+    "metadatos": {
+      "type": "object",
+      "required": ["titulo_youtube", "descripcion", "tags", "categoria_id"],
+      "properties": {
+        "titulo_youtube": {"type": "string", "minLength": 5, "maxLength": 100},
+        "descripcion": {"type": "string", "minLength": 50, "maxLength": 5000},
+        "tags": {"type": "array", "items": {"type": "string"}, "minItems": 3},
+        "categoria_id": {"type": "string"}
+      }
+    },
+    "divulgacion_ia": {"type": "boolean"},
+    "fuentes": {"type": "array", "items": {"type": "object"}}
+  }
+}

@@ -191,6 +191,12 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .agent-facts dd { margin: 2px 0 0; }
 .toggle { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; color: var(--muted); }
 .toggle input { accent-color: var(--arc); width: 16px; height: 16px; }
+.ideas { border: 1px solid var(--line); padding: 10px 12px 12px; margin: 10px 0 0; display: grid; gap: 8px; }
+.ideas legend { padding: 0 4px; }
+.idea { display: grid; grid-template-columns: 20px 1fr; gap: 10px; align-items: start; padding: 8px; cursor: pointer; border-left: 2px solid transparent; }
+.idea.on { background: var(--arc-dim); border-left-color: var(--arc); }
+.idea input { accent-color: var(--arc); width: 16px; height: 16px; margin-top: 3px; }
+.ideas:disabled .idea { cursor: default; }
 .output { white-space: pre-wrap; font: 0.9rem/1.55 var(--body); background: var(--ink); border: 1px solid var(--line); padding: 12px; margin: 8px 0 0; max-height: 60vh; overflow: auto; }
 
 /* ---------- Kanban ---------- */

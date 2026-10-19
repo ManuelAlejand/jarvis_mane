@@ -2,7 +2,7 @@
 import { useState } from "react";
 import type { JarvisState } from "@/components/useJarvis";
 import { browserClient } from "@/lib/supabase/browser";
-import type { AgentRow, AgentRun } from "@/lib/types";
+import { VIDEO_ESTADO, type AgentRow, type AgentRun } from "@/lib/types";
 
 const RUNTIME: Record<AgentRow["runtime"], string> = { api: "Servidor", chat: "Chat Claude", local: "Motor local" };
 const MODEL: Record<string, string> = { "claude-haiku-5-5": "Haiku", "claude-sonnet-5-5": "Sonnet", "claude-opus-5-5": "Opus" };
@@ -59,6 +59,8 @@ export function AgentsView({ s }: { s: JarvisState }) {
 
       {jarvis && <AgentCard a={jarvis} s={s} onOpen={() => setOpenId(jarvis.id)} lead />}
 
+      <StudioPanel s={s} />
+
       <ol className="crew" aria-label="Flujo del estudio de YouTube">
         {crew.map((a, i) => (
           <li key={a.id}>
@@ -107,6 +109,93 @@ function AgentCard({ a, s, onOpen, lead }: { a: AgentRow; s: JarvisState; onOpen
         )}
       </div>
     </article>
+  );
+}
+
+/* --------------------- Estudio: PC conectado + Shorts en producción --------------------- */
+const ACTIVE = ["guion_pendiente", "guionando", "cambios", "produciendo", "validando", "publicar", "publicando"];
+
+function StudioPanel({ s }: { s: JarvisState }) {
+  const online = s.heartbeat ? Date.now() - new Date(s.heartbeat).getTime() < 3 * 60_000 : false;
+  const shown = s.videos.filter((v) => v.estado !== "descartado").slice(0, 8);
+  return (
+    <section className="panel">
+      <div className="panel-title">
+        <h2>Shorts en el estudio</h2>
+        <span className={`state ${online ? "working" : "off"}`} title={s.heartbeat ? `Último contacto ${ago(s.heartbeat)}` : "El puente nunca se ha conectado"}>
+          <i />{online ? "PC conectado" : "PC desconectado"}
+        </span>
+      </div>
+      {shown.length ? (
+        <ul className="log">
+          {shown.map((v) => {
+            const tone = v.estado === "error" ? "error" : v.estado === "revision" ? "queued" : v.estado === "publicado" ? "done" : ACTIVE.includes(v.estado) ? "working" : "off";
+            return (
+              <li key={v.id} style={{ gridTemplateColumns: "54px 1fr" }}>
+                <span className="num muted">V{v.ref}</span>
+                <span>
+                  {v.titulo}
+                  <br />
+                  <span className={`state ${tone}`}><i />{VIDEO_ESTADO[v.estado] ?? v.estado}</span>
+                  {v.fase_detalle && ACTIVE.includes(v.estado) && <span className="small muted"> · {v.fase_detalle}</span>}
+                  {v.error && <span className="small" style={{ color: "var(--alert)" }}> · {v.error}</span>}
+                  {v.youtube_url && <> · <a className="small" href={v.youtube_url} target="_blank" rel="noreferrer">Abrir en YouTube</a></>}
+                </span>
+              </li>
+            );
+          })}
+        </ul>
+      ) : (
+        <p className="empty">Sin Shorts todavía. Pide ideas al Investigador y elige cuáles producir.</p>
+      )}
+      {!online && shown.some((v) => ACTIVE.includes(v.estado)) && (
+        <p className="small" style={{ color: "var(--gold)", marginTop: 10 }}>Hay videos esperando: enciende el PC y abre el puente del estudio.</p>
+      )}
+    </section>
+  );
+}
+
+function IdeaPicker({ run, isAdmin }: { run: AgentRun; isAdmin: boolean }) {
+  const ideas = run.result?.ideas ?? [];
+  const [sel, setSel] = useState<number[]>(run.result?.selected ?? []);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const sent = !!run.result?.sent;
+
+  const toggle = (n: number) => setSel((x) => (x.includes(n) ? x.filter((y) => y !== n) : [...x, n].sort()));
+  const send = async () => {
+    setBusy(true);
+    const { data } = await browserClient().auth.getSession();
+    const res = await fetch("/api/studio/select", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${data.session?.access_token ?? ""}` },
+      body: JSON.stringify({ run_id: run.id, selected: sel }),
+    });
+    const json = await res.json();
+    setMsg(res.ok ? json.text : `⚠️ ${json.error}`);
+    setBusy(false);
+  };
+
+  return (
+    <fieldset className="ideas" disabled={sent || !isAdmin}>
+      <legend className="small muted">{sent ? "Ideas enviadas al Guionista" : "Elige las ideas que quieres producir"}</legend>
+      {ideas.map((i, n) => (
+        <label key={n} className={`idea ${sel.includes(n) ? "on" : ""}`}>
+          <input type="checkbox" checked={sel.includes(n)} onChange={() => toggle(n)} />
+          <span>
+            <b>{i.titulo}</b>
+            <br />
+            <span className="small muted">{i.gancho}</span>
+          </span>
+        </label>
+      ))}
+      {!sent && isAdmin && (
+        <button type="button" className="btn" disabled={!sel.length || busy} onClick={send} style={{ justifySelf: "start" }}>
+          {busy ? "Enviando…" : `Enviar ${sel.length || ""} al guionista`}
+        </button>
+      )}
+      {msg && <p className="small">{msg}</p>}
+    </fieldset>
   );
 }
 
@@ -164,6 +253,7 @@ function AgentDetail({ s, a, onBack }: { s: JarvisState; a: AgentRow; onBack: ()
                 {r.summary && <p style={{ marginTop: 4 }}><span className="muted small">Resultado:</span> {r.summary}</p>}
                 {r.status === "running" && r.current_step && <p className="small" style={{ color: "var(--arc)", marginTop: 4 }}>{r.current_step}</p>}
                 {r.error && <p className="small" style={{ color: "var(--alert)", marginTop: 4 }}>{r.error}</p>}
+                {r.result?.ideas?.length ? <IdeaPicker run={r} isAdmin={s.me?.role === "admin"} /> : null}
                 {r.output && (
                   <>
                     <button className="link-btn" style={{ marginTop: 6 }} onClick={() => setExpanded(expanded === r.id ? null : r.id)}>

@@ -1,0 +1,8 @@
+.env
+credenciales/
+proyectos/*/
+!proyectos/ejemplo-acueductos/
+__pycache__/
+*.pyc
+puente.log
+*.part

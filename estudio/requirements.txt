@@ -1,0 +1,11 @@
+requests>=2.31
+PyJWT>=2.8
+jsonschema>=4.21
+mcp>=1.2
+google-api-python-client>=2.120
+google-auth>=2.28
+google-auth-oauthlib>=1.2
+# Voz gratuita y de uso comercial (Apache-2.0). Descarga el modelo (~330 MB) la primera vez.
+kokoro>=0.9.4
+soundfile>=0.12
+numpy>=1.26
