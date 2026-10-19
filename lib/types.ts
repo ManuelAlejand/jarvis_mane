@@ -36,6 +36,41 @@ export interface LogRow {
   created_at: string;
 }
 
+export interface AgentRow {
+  id: string;
+  slug: string;
+  name: string;
+  role: string;
+  color: string;
+  project_id: string | null;
+  description: string | null;
+  enabled: boolean;
+  status: "idle" | "working" | "error";
+  runtime: "api" | "chat" | "local";
+  model: string;
+  position: number;
+  current_run_id: string | null;
+  last_summary: string | null;
+  last_run_at: string | null;
+}
+
+export interface AgentRun {
+  id: string;
+  agent_id: string;
+  status: "queued" | "running" | "paused" | "done" | "error";
+  input: string;
+  current_step: string | null;
+  output: string | null;
+  summary: string | null;
+  verdict: "APROBADO" | "RECHAZADO" | null;
+  cost_usd: number;
+  source: string;
+  error: string | null;
+  created_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+}
+
 export const STATUS_LABEL: Record<TaskStatus, string> = {
   backlog: "Backlog",
   en_curso: "En curso",

@@ -4,11 +4,13 @@ import type { Session } from "@supabase/supabase-js";
 import { browserClient } from "@/lib/supabase/browser";
 import { useJarvis } from "@/components/useJarvis";
 import { ActivityView, ConsoleView, HudView, KanbanView, ProjectsView } from "@/components/views";
+import { AgentsView } from "@/components/AgentsView";
 
 const ICONS: Record<string, React.ReactNode> = {
   hud: <circle cx="12" cy="12" r="8" />,
   proyectos: <path d="M4 5h7v6H4zM13 5h7v14h-7zM4 13h7v6H4z" />,
   kanban: <path d="M4 4h4v16H4zM10 4h4v10h-4zM16 4h4v7h-4z" />,
+  agentes: <path d="M12 4a3 3 0 1 1 0 6 3 3 0 0 1 0-6zM5 20c0-3.9 3.1-7 7-7s7 3.1 7 7M19 7.5a2 2 0 1 1 0 .01M5 7.5a2 2 0 1 1 0 .01" />,
   actividad: <path d="M3 12h4l3-7 4 14 3-7h4" />,
   consola: <path d="M4 6l6 6-6 6M12 18h8" />,
 };
@@ -16,6 +18,7 @@ const NAV = [
   { id: "hud", label: "Inicio" },
   { id: "proyectos", label: "Proyectos" },
   { id: "kanban", label: "Tablero" },
+  { id: "agentes", label: "Agentes" },
   { id: "actividad", label: "Actividad" },
   { id: "consola", label: "Consola" },
 ];
@@ -100,6 +103,8 @@ function Shell({ userId, email }: { userId: string; email: string }) {
           <ProjectsView s={s} />
         ) : view === "kanban" ? (
           <KanbanView s={s} />
+        ) : view === "agentes" ? (
+          <AgentsView s={s} />
         ) : view === "actividad" ? (
           <ActivityView s={s} />
         ) : (

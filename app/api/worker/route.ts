@@ -3,6 +3,7 @@ import { adminClient, log } from "@/lib/supabase/admin";
 import { sendMessage } from "@/lib/telegram";
 import { BudgetExceeded, classify, RateLimited } from "@/lib/ai";
 import { applyClassification, inbox, type Actor } from "@/lib/router";
+import { executeRun, listAgents } from "@/lib/agents";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -39,7 +40,7 @@ async function runJob(job: Job): Promise<unknown> {
       const { data: projects } = await adminClient().from("projects").select("slug,name").order("created_at");
       let reply;
       try {
-        const c = await classify(text, projects ?? [], job.id);
+        const c = await classify(text, projects ?? [], await listAgents(), job.id);
         reply = await applyClassification(c, text, actor);
       } catch (e) {
         if (!(e instanceof BudgetExceeded)) throw e; // RateLimited → vuelve a pausarse
@@ -47,6 +48,10 @@ async function runJob(job: Job): Promise<unknown> {
       }
       if (job.source_chat) await sendMessage(job.source_chat, `▶️ Procesé tu mensaje pendiente «${text.slice(0, 60).replace(/</g, "&lt;")}»:\n\n${reply.text}`);
       return { done: true };
+    }
+    case "agent_run": {
+      // Si vuelve a pausarse, executeRun deja un job nuevo en la cola; este se cierra.
+      return { result: await executeRun(String(job.payload.run_id)) };
     }
     default:
       throw new Error(`Tipo de trabajo desconocido: ${job.kind}`);

@@ -1,6 +1,7 @@
 import "server-only";
 import { adminClient, log } from "@/lib/supabase/admin";
 import { aiAvailable, BudgetExceeded, classify, RateLimited, type Classification } from "@/lib/ai";
+import { findAgent, listAgents, matchAgentByKeyword, startRun } from "@/lib/agents";
 import type { Project, Task, TaskStatus } from "@/lib/types";
 import { STATUS_LABEL } from "@/lib/types";
 
@@ -47,6 +48,8 @@ const HELP = [
   "/mover 12 en_curso — backlog · en_curso · bloqueada · hecha",
   "/proyecto [nombre] — detalle (sin nombre: lista)",
   "/gasto — gasto de API del mes",
+  "/agentes — quién está trabajando y en qué",
+  "/agente investigador busca nichos de misterio — darle una orden",
   "",
   "También entiendo: <i>pendientes</i>, <i>cómo va todo</i>, <i>cómo va youtube</i>, <i>gasto</i>.",
   "Y texto libre: <i>recuérdame comprar el dominio, es urgente</i> 🧠",
@@ -88,6 +91,15 @@ export async function route(input: string, actor: Actor): Promise<Reply> {
         return await proyecto(args);
       case "gasto":
         return await gasto();
+      case "agentes":
+        return await agentes();
+      case "agente": {
+        const m = args.match(/^(\S+)\s+([\s\S]+)$/);
+        if (!m) return { text: "Uso: /agente &lt;nombre&gt; &lt;orden&gt;. Ve los nombres con /agentes." };
+        const agent = await findAgent(m[1]);
+        if (!agent) return { text: `No conozco al agente «${esc(m[1])}». Usa /agentes.` };
+        return await startRun(agent, m[2], { requestedBy: actor.profileId, source: actor.source, chatId: actor.chatId });
+      }
       case "_inbox":
         return await freeText(args, actor);
       default:
@@ -249,6 +261,10 @@ export async function inbox(text: string, actor: Actor, note?: string): Promise<
 
 /** Nivel 3: texto libre → Haiku clasifica → se ejecuta la acción equivalente. */
 async function freeText(text: string, actor: Actor): Promise<Reply> {
+  // Atajo sin IA: si el texto trae palabras clave de un agente ("busca ideas de video…"), va directo a él
+  const direct = await matchAgentByKeyword(text);
+  if (direct) return startRun(direct, text, { requestedBy: actor.profileId, source: actor.source, chatId: actor.chatId });
+
   const avail = await aiAvailable();
   if (!avail.ok) {
     return inbox(
@@ -259,9 +275,12 @@ async function freeText(text: string, actor: Actor): Promise<Reply> {
         : undefined,
     );
   }
-  const { data } = await adminClient().from("projects").select("slug,name").order("created_at");
+  const [{ data }, agents] = await Promise.all([
+    adminClient().from("projects").select("slug,name").order("created_at"),
+    listAgents(),
+  ]);
   try {
-    const c = await classify(text, data ?? []);
+    const c = await classify(text, data ?? [], agents);
     return await applyClassification(c, text, actor);
   } catch (e) {
     if (e instanceof RateLimited) {
@@ -290,6 +309,15 @@ export async function applyClassification(c: Classification, original: string, a
   let r: Reply;
 
   switch (c.intent) {
+    case "run_agent": {
+      const agent = c.agent_slug ? await findAgent(c.agent_slug) : null;
+      if (agent) {
+        r = await startRun(agent, c.title ?? original, { requestedBy: actor.profileId, source: actor.source, chatId: actor.chatId });
+        break;
+      }
+      r = await nueva(`${title}${slug} !${prio}`, actor, ["ia"]);
+      break;
+    }
     case "create_task":
       r = await nueva(`${title}${slug} !${prio}`, actor, ["ia"]);
       break;
@@ -366,6 +394,29 @@ async function proyecto(args: string): Promise<Reply> {
     ]
       .filter(Boolean)
       .join("\n"),
+  };
+}
+
+const RUNTIME_LABEL: Record<string, string> = { api: "servidor", chat: "chat Claude", local: "motor local" };
+
+async function agentes(): Promise<Reply> {
+  const db = adminClient();
+  const [agents, { data: runs }] = await Promise.all([
+    listAgents(),
+    db.from("agent_runs").select("agent_id,current_step,status").in("status", ["queued", "running", "paused"]),
+  ]);
+  const rows = agents;
+  return {
+    text: [
+      "<b>Agentes</b>",
+      ...rows.map((a) => {
+        const active = (runs ?? []).filter((r) => r.agent_id === a.id);
+        const running = active.find((r) => r.status === "running");
+        const icon = !a.enabled ? "⚫" : a.status === "error" ? "🔴" : running ? "🟢" : active.length ? "🟡" : "⚪";
+        const doing = running?.current_step ?? (active.length ? `${active.length} orden(es) en cola` : !a.enabled ? "Desactivado" : "En espera");
+        return `${icon} <b>${esc(a.name)}</b> · ${esc(a.role)} <i>(${RUNTIME_LABEL[a.runtime]})</i>\n    ${esc(doing)}`;
+      }),
+    ].join("\n"),
   };
 }
 
