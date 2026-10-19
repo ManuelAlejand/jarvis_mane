@@ -4,12 +4,19 @@ Los subtítulos usan el TEXTO del guion (bien escrito) con los TIEMPOS que detec
 se alinean las dos secuencias de palabras y las que no coinciden se interpolan entre vecinas.
 Si faster-whisper no está instalado o falla, devuelve None y el montaje usa la estimación por letras.
 
-Modelo: WHISPER_MODELO en .env (por defecto "base": ~140 MB, rápido en GPU y aceptable en CPU).
+Modelo: WHISPER_MODELO en .env (por defecto "base": ~140 MB). Dispositivo: WHISPER_DISPOSITIVO (cpu por defecto:
+en Windows la GPU de faster-whisper necesita DLLs de CUDA aparte y puede colgarse; en CPU tarda ~10 s por video).
+Whisper corre en un PROCESO APARTE con tiempo límite (WHISPER_TIMEOUT_SEG): si se cuelga o se cierra, el montaje sigue
+con tiempos estimados en vez de quedarse esperando.
 """
 from __future__ import annotations
 
 import difflib
+import json
+import os
 import re
+import subprocess
+import sys
 import unicodedata
 from pathlib import Path
 
@@ -28,10 +35,13 @@ def _cargar():
     if _modelo is None:
         from faster_whisper import WhisperModel
         nombre = env("WHISPER_MODELO", "base") or "base"
-        try:
-            _modelo = WhisperModel(nombre, device="cuda", compute_type="float16")
-        except Exception:  # noqa: BLE001 — sin GPU/CUDA: CPU
-            _modelo = WhisperModel(nombre, device="cpu", compute_type="int8")
+        if (env("WHISPER_DISPOSITIVO", "cpu") or "cpu").lower() == "cuda":
+            try:
+                _modelo = WhisperModel(nombre, device="cuda", compute_type="float16")
+                return _modelo
+            except Exception:  # noqa: BLE001 — sin DLLs de CUDA: CPU
+                pass
+        _modelo = WhisperModel(nombre, device="cpu", compute_type="int8")
     return _modelo
 
 
@@ -64,24 +74,50 @@ def alinear(guion: list[str], oidas: list[tuple[str, float, float]], dur: float)
     return [(p, t[0], t[1]) for p, t in zip(guion, tiempos)]  # type: ignore[index]
 
 
-def tiempos_escena(audio: Path, texto: str, idioma: str, dur: float) -> list[tuple[str, float, float]] | None:
-    """(palabra del guion, inicio, fin) relativos al inicio del audio de la escena; None si no hay Whisper."""
-    if (env("SUBTITULOS_SINCRONIA", "whisper") or "whisper").lower() != "whisper":
+def _oir(audio: str, idioma: str) -> list[tuple[str, float, float]]:
+    segmentos, _ = _cargar().transcribe(audio, language=idioma, word_timestamps=True, vad_filter=False,
+                                        beam_size=1, condition_on_previous_text=False)
+    return [(w.word.strip(), float(w.start), float(w.end)) for s in segmentos for w in (s.words or [])]
+
+
+def tiempos_todas(escenas: list[tuple[Path, str, float]], idioma: str) -> list[list[tuple[str, float, float]] | None] | None:
+    """Para cada (audio, texto, duración): palabras del guion con tiempos reales. None si Whisper no está o falla.
+
+    Corre en un proceso aparte con tiempo límite: un cuelgue o cierre de Whisper no detiene el montaje.
+    """
+    if (env("SUBTITULOS_SINCRONIA", "whisper") or "whisper").lower() != "whisper" or not escenas:
         return None
+    limite = int(env("WHISPER_TIMEOUT_SEG", "300") or 300)
+    entrada = json.dumps({"idioma": idioma, "audios": [str(a) for a, _, _ in escenas]})
     try:
-        modelo = _cargar()
-        segmentos, _ = modelo.transcribe(str(audio), language=idioma, word_timestamps=True, vad_filter=False,
-                                         beam_size=1, condition_on_previous_text=False)
-        oidas = [(w.word.strip(), float(w.start), float(w.end)) for s in segmentos for w in (s.words or [])]
-    except Exception as e:  # noqa: BLE001
-        print(f"  (Whisper no disponible: {type(e).__name__}; subtítulos con tiempos estimados)", flush=True)
+        r = subprocess.run([sys.executable, __file__, "--oir"], input=entrada, capture_output=True, text=True,
+                           encoding="utf-8", errors="replace", timeout=limite, cwd=Path(__file__).parent,
+                           env={**os.environ, "PYTHONIOENCODING": "utf-8"})
+    except subprocess.TimeoutExpired:
+        print(f"  (Whisper tardó más de {limite} s; subtítulos con tiempos estimados)", flush=True)
         return None
-    if not oidas:
+    marca = next((l for l in reversed(r.stdout.splitlines()) if l.startswith("OIDAS ")), None)
+    if r.returncode != 0 or not marca:
+        print(f"  (Whisper no disponible, código {r.returncode}: {(r.stderr or r.stdout)[-200:].strip()}; "
+              "subtítulos con tiempos estimados)", flush=True)
         return None
-    return alinear(texto.split(), oidas, dur)
+    oidas_por_escena = json.loads(marca[6:])
+    out: list[list[tuple[str, float, float]] | None] = []
+    for (_, texto, dur), oidas in zip(escenas, oidas_por_escena):
+        out.append(alinear(texto.split(), [tuple(o) for o in oidas], dur) if oidas else None)
+    return out
 
 
-if __name__ == "__main__":
+def _proceso_oir() -> None:
+    datos = json.loads(sys.stdin.read())
+    res = [_oir(a, datos["idioma"]) for a in datos["audios"]]
+    print("OIDAS " + json.dumps(res), flush=True)
+    os._exit(0)  # salir sin liberar el modelo: en Windows a veces se cuelga al cerrarlo
+
+
+if __name__ == "__main__" and "--oir" in sys.argv:
+    _proceso_oir()
+elif __name__ == "__main__":
     # Prueba de alineación sin modelo: el guion dice "1,000" y Whisper oye "mil"
     guion = "Bajas 1,000 metros y el sol deja de existir.".split()
     oidas = [("Bajas", 0.10, 0.42), ("mil", 0.50, 0.71), ("metros", 0.74, 1.10), ("y", 1.30, 1.36), ("el", 1.38, 1.47),

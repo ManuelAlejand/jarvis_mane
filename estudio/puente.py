@@ -20,6 +20,7 @@ import shutil
 import socket
 import subprocess
 import sys
+import threading
 import time
 import traceback
 import unicodedata
@@ -87,6 +88,16 @@ def correr(args: list[str], video: dict, agente: str, etiqueta: str, timeout: in
                          encoding="utf-8", errors="replace", env=env)
     salida, ultimo = [], 0.0
     inicio = time.time()
+    # Vigilante: mata el proceso si se pasa del tiempo aunque no imprima nada (un cuelgue silencioso)
+    vencido = threading.Event()
+
+    def _vencer() -> None:
+        vencido.set()
+        p.kill()
+
+    vigilante = threading.Timer(timeout, _vencer)
+    vigilante.daemon = True
+    vigilante.start()
     assert p.stdout
     for linea in p.stdout:
         salida.append(linea)
@@ -98,6 +109,9 @@ def correr(args: list[str], video: dict, agente: str, etiqueta: str, timeout: in
             p.kill()
             raise Fallo(f"{etiqueta}: tardó más de {timeout // 60} min")
     p.wait()
+    vigilante.cancel()
+    if vencido.is_set():
+        raise Fallo(f"{etiqueta}: tardó más de {timeout // 60} min (proceso detenido)")
     texto = "".join(salida)
     if p.returncode not in ok_codes:
         raise Fallo(f"{etiqueta} falló (código {p.returncode}): {texto[-600:].strip()}")
@@ -316,7 +330,7 @@ def producir(video: dict, carpeta: Path, solo: list[int] | None = None) -> None:
     extra = ["--solo", ",".join(map(str, solo)), "--forzar"] if solo else []
     correr([PY, script_clips, str(carpeta), *extra], video, "productor", "Clips")
     reportar(video["id"], agente="productor", paso="Montando video y subtítulos", fase_detalle="Montando video y subtítulos")
-    correr([PY, "scripts/ensamblar.py", str(carpeta)], video, "productor", "Montaje")
+    correr([PY, "scripts/ensamblar.py", str(carpeta)], video, "productor", "Montaje", timeout=900)
     dur = leer_json(carpeta / "produccion.json").get("ensamblado", {}).get("duracion_seg")
     reportar(video["id"], agente="productor", fin=True, duracion_seg=dur,
              resumen=f"V{video['ref']}: Short de {dur:.0f} s listo para validar" if dur else "Video montado")

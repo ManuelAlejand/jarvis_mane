@@ -19,7 +19,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 from comun import (carpeta_proyecto, duracion, env, ffmpeg, leer_json,  # noqa: E402
                    nombre_escena, registrar_produccion, resolucion, RAIZ)
-from tiempos_palabras import tiempos_escena  # noqa: E402 — tiempos reales por palabra (Whisper)
+from tiempos_palabras import tiempos_todas  # noqa: E402 — tiempos reales por palabra (Whisper)
 
 RESPIRO = 0.35   # segundos de silencio al final de cada escena
 FPS = 30
@@ -45,13 +45,16 @@ def ts_ass(seg: float) -> str:
 
 def palabras_con_tiempo(linea: list[dict], idioma: str) -> tuple[list[list[tuple[str, float, float]]], str]:
     """Por escena: (palabra, inicio, fin). Tiempos reales con Whisper si está; si no, estimados por letras."""
+    escenas = [e for e in linea if e["narracion"].split() and e["dur_audio"] > 0 and e.get("audio")]
+    reales_todas = tiempos_todas([(Path(e["audio"]), e["narracion"], e["dur_audio"]) for e in escenas], idioma) or []
+    reales_por_n = {e["n"]: r for e, r in zip(escenas, reales_todas)}
     out, metodo = [], "estimado"
     for esc in linea:
         frase = []
         palabras = esc["narracion"].split()
         if not palabras or esc["dur_audio"] <= 0:
             continue
-        reales = tiempos_escena(Path(esc["audio"]), esc["narracion"], idioma, esc["dur_audio"]) if esc.get("audio") else None
+        reales = reales_por_n.get(esc["n"])
         if reales:
             metodo = "whisper"
             out.append([(p, esc["inicio"] + a, esc["inicio"] + min(b, esc["dur_audio"])) for p, a, b in reales])
