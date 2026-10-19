@@ -89,7 +89,9 @@ export async function callClaude(call: ClaudeCall): Promise<{ text: string; cost
       body: JSON.stringify({
         model,
         max_tokens: call.maxTokens,
-        thinking: { type: "disabled" },
+        // Haiku acepta apagar el pensamiento; en Sonnet/Opus 5.5 el mínimo es "between_tools"
+        // (sin pensamiento previo). Ver docs de cada modelo.
+        thinking: { type: model.includes("haiku") ? "disabled" : "between_tools" },
         output_config,
         system: [{ type: "text", text: call.system, ...(call.cacheSystem ? { cache_control: { type: "ephemeral" } } : {}) }],
         messages: [{ role: "user", content: call.user }],
