@@ -38,6 +38,7 @@ export default function App() {
 function Shell({ userId, email }: { userId: string; email: string }) {
   const s = useJarvis(userId);
   const [view, setView] = useState("hud");
+  const [account, setAccount] = useState(false);
 
   useEffect(() => {
     const fromHash = window.location.hash.replace("#", "");
@@ -66,6 +67,9 @@ function Shell({ userId, email }: { userId: string; email: string }) {
           <div className="brand"><span className="brand-dot" aria-hidden="true" />JARVIS</div>
           <div className="row" style={{ alignItems: "center", gap: 14 }}>
             <span className={`live ${s.live ? "" : "off"}`}><i />{s.live ? "En vivo" : "Reconectando"}</span>
+            <button className="btn btn-ghost small" style={{ minHeight: 34, padding: "4px 10px" }} onClick={() => setAccount((a) => !a)}>
+              Cuenta
+            </button>
             <button
               className="btn btn-ghost small"
               style={{ minHeight: 34, padding: "4px 10px" }}
@@ -76,6 +80,8 @@ function Shell({ userId, email }: { userId: string; email: string }) {
             </button>
           </div>
         </header>
+
+        {account && <AccountPanel email={email} onClose={() => setAccount(false)} />}
 
         {s.error && (
           <div className="panel" role="alert" style={{ marginBottom: 16, borderLeft: "3px solid var(--alert)" }}>
@@ -105,9 +111,21 @@ function Shell({ userId, email }: { userId: string; email: string }) {
 }
 
 function Login() {
+  const [mode, setMode] = useState<"password" | "link">("password");
   const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [state, setState] = useState<"idle" | "sending" | "sent" | "error">("idle");
   const [msg, setMsg] = useState("");
+
+  const submitPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setState("sending");
+    const { error } = await browserClient().auth.signInWithPassword({ email: email.trim(), password });
+    if (error) {
+      setState("error");
+      setMsg(/invalid/i.test(error.message) ? "Correo o contraseña incorrectos." : error.message);
+    }
+  };
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -131,7 +149,24 @@ function Login() {
       <div className="panel">
         <div className="brand"><span className="brand-dot" aria-hidden="true" />JARVIS</div>
         <h1>Centro de control</h1>
-        <p className="muted" style={{ marginBottom: 20 }}>Entra con tu correo. Te enviamos un enlace de acceso, sin contraseña.</p>
+        {mode === "password" ? (
+          <>
+            <p className="muted" style={{ marginBottom: 20 }}>Entra con tu correo y contraseña. Tu sesión queda guardada en este dispositivo.</p>
+            <form className="grid" style={{ gap: 12 }} onSubmit={submitPassword}>
+              <label htmlFor="em" className="small muted">Correo</label>
+              <input id="em" type="email" required autoComplete="username" className="field" value={email} onChange={(e) => setEmail(e.target.value)} />
+              <label htmlFor="pw" className="small muted">Contraseña</label>
+              <input id="pw" type="password" required autoComplete="current-password" className="field" value={password} onChange={(e) => setPassword(e.target.value)} />
+              <button className="btn" disabled={state === "sending"}>{state === "sending" ? "Entrando…" : "Entrar"}</button>
+              {state === "error" && <p role="alert" style={{ color: "var(--alert)" }}>{msg}</p>}
+              <button type="button" className="link-btn" onClick={() => { setMode("link"); setState("idle"); }}>
+                ¿No tienes contraseña? Entra con un enlace al correo
+              </button>
+            </form>
+          </>
+        ) : (
+          <>
+        <p className="muted" style={{ marginBottom: 20 }}>Te enviamos un enlace de acceso al correo. Luego puedes crear tu contraseña en Cuenta.</p>
         {state === "sent" ? (
           <p>Revisa <b>{email}</b> y abre el enlace en este mismo dispositivo.</p>
         ) : (
@@ -140,9 +175,49 @@ function Login() {
             <input id="em" type="email" required autoComplete="email" className="field" value={email} onChange={(e) => setEmail(e.target.value)} />
             <button className="btn" disabled={state === "sending"}>{state === "sending" ? "Enviando…" : "Enviar enlace"}</button>
             {state === "error" && <p role="alert" style={{ color: "var(--alert)" }}>{msg}</p>}
+            <button type="button" className="link-btn" onClick={() => { setMode("password"); setState("idle"); }}>
+              Entrar con contraseña
+            </button>
           </form>
+        )}
+          </>
         )}
       </div>
     </div>
+  );
+}
+
+function AccountPanel({ email, onClose }: { email: string; onClose: () => void }) {
+  const [pw, setPw] = useState("");
+  const [pw2, setPw2] = useState("");
+  const [state, setState] = useState<"idle" | "saving" | "done" | "error">("idle");
+  const [msg, setMsg] = useState("");
+
+  const save = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (pw.length < 8) { setState("error"); setMsg("Usa al menos 8 caracteres."); return; }
+    if (pw !== pw2) { setState("error"); setMsg("Las contraseñas no coinciden."); return; }
+    setState("saving");
+    const { error } = await browserClient().auth.updateUser({ password: pw });
+    if (error) { setState("error"); setMsg(error.message); } else { setState("done"); setPw(""); setPw2(""); }
+  };
+
+  return (
+    <section className="panel" style={{ marginBottom: 16 }} aria-label="Cuenta">
+      <div className="panel-title"><h2>Cuenta</h2><button className="btn btn-ghost" onClick={onClose}>Cerrar</button></div>
+      <p className="muted small" style={{ marginBottom: 12 }}>{email}</p>
+      {state === "done" ? (
+        <p>Contraseña guardada. La próxima vez entra con correo y contraseña; tu navegador puede recordarla.</p>
+      ) : (
+        <form className="grid" style={{ gap: 10, maxWidth: 380 }} onSubmit={save}>
+          <label htmlFor="np1" className="small muted">Nueva contraseña</label>
+          <input id="np1" type="password" autoComplete="new-password" className="field" value={pw} onChange={(e) => setPw(e.target.value)} />
+          <label htmlFor="np2" className="small muted">Repítela</label>
+          <input id="np2" type="password" autoComplete="new-password" className="field" value={pw2} onChange={(e) => setPw2(e.target.value)} />
+          <button className="btn" disabled={state === "saving"}>{state === "saving" ? "Guardando…" : "Guardar contraseña"}</button>
+          {state === "error" && <p role="alert" style={{ color: "var(--alert)" }}>{msg}</p>}
+        </form>
+      )}
+    </section>
   );
 }
