@@ -79,6 +79,8 @@ def tts_chatterbox(texto: str, idioma: str, destino: Path, intento: int = 0) -> 
     torch.manual_seed(1234 + intento * 977)  # otra semilla en cada reintento
     kwargs = {"language_id": idioma, "exaggeration": exag, "cfg_weight": cfg}
     ref = env(f"CHATTERBOX_VOZ_{idioma.upper()}") or env("CHATTERBOX_VOZ_REF")
+    if not (ref and Path(ref).exists()):
+        ref = voz_referencia_auto(idioma)
     if ref and Path(ref).exists():
         kwargs["audio_prompt_path"] = ref  # clip de 10 s de la voz a imitar, en el MISMO idioma
     try:
@@ -90,6 +92,46 @@ def tts_chatterbox(texto: str, idioma: str, destino: Path, intento: int = 0) -> 
     sf.write(str(tmp), datos, _chatterbox.sr)
     ffmpeg("-i", str(tmp), "-ar", "44100", "-ac", "2", "-b:a", "192k", str(destino))
     tmp.unlink(missing_ok=True)
+
+
+# Texto para la voz de referencia automática: tono de documental, frases de largo variado (~12 s)
+TEXTO_REFERENCIA = {
+    "es": "Nadie sabe con certeza qué ocurrió aquella noche. Los registros son escasos, y los testigos, "
+          "todavía hoy, prefieren no hablar. Pero hay un detalle que lo cambia todo.",
+    "en": "Nobody knows for sure what happened that night. The records are scarce, and the witnesses, "
+          "even today, would rather not talk. But there is one detail that changes everything.",
+    "pt": "Ninguém sabe ao certo o que aconteceu naquela noite. Os registros são escassos, e as testemunhas, "
+          "ainda hoje, preferem não falar. Mas há um detalhe que muda tudo.",
+}
+
+
+def voz_referencia_auto(idioma: str) -> str | None:
+    """Sin grabación propia: crea una voz de referencia con Kokoro (Apache-2.0, uso comercial) en el idioma
+    del guion, para que Chatterbox no use su voz por defecto en inglés (acento y más tartamudeos).
+    Se crea una sola vez en assets/voces/auto_<idioma>.wav. Desactívalo con CHATTERBOX_VOZ_AUTO=0."""
+    if (env("CHATTERBOX_VOZ_AUTO", "1") or "1") == "0" or idioma not in TEXTO_REFERENCIA:
+        return None
+    from comun import RAIZ
+    destino = RAIZ / "assets" / "voces" / f"auto_{idioma}.wav"
+    if destino.exists():
+        return str(destino)
+    try:
+        import numpy as np
+        import soundfile as sf
+        from kokoro import KPipeline
+
+        codigo = KOKORO_IDIOMA.get(idioma, "e")
+        if codigo not in _pipelines:
+            _pipelines[codigo] = KPipeline(lang_code=codigo)
+        voz = env(f"KOKORO_VOZ_{idioma.upper()}", KOKORO_VOZ.get(idioma, "em_alex"))
+        trozos = [a for _, _, a in _pipelines[codigo](TEXTO_REFERENCIA[idioma], voice=voz, speed=0.95)]
+        destino.parent.mkdir(parents=True, exist_ok=True)
+        sf.write(str(destino), np.concatenate([np.asarray(t) for t in trozos]), 24000)
+        print(f"  Voz de referencia creada con Kokoro ({voz}): {destino.name}", flush=True)
+        return str(destino)
+    except Exception as e:  # noqa: BLE001 — sin referencia, Chatterbox usa su voz por defecto
+        print(f"  No pude crear la voz de referencia ({type(e).__name__}); uso la voz por defecto", flush=True)
+        return None
 
 
 def chatterbox_disponible() -> bool:

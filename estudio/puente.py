@@ -191,8 +191,9 @@ PLANTILLA_GUION = """{
   "escenas": [
     {"n": 1, "narracion": "Dive 1,000 meters down and the sun simply stops existing.",
      "prompt_visual": "Sunlight rays fading into deep blue ocean water, camera descending",
-     "busqueda_stock": "deep ocean sunlight rays", "duracion_seg": 5}
+     "busqueda_stock": "ocean sunlight rays", "duracion_seg": 5}
   ],
+  "sujeto_stock": ["ocean", "sea"],
   "clips_short": [],
   "metadatos": {
     "titulo_youtube": "The Ocean Zone Where Sunlight Never Arrives",
@@ -272,11 +273,13 @@ FORMATO OBLIGATORIO: YouTube Short — este encargo reemplaza las reglas de vide
   6) Cierre que conecte con el gancho (invita a volver a verlo) o una pregunta para comentarios.
   Escribe la narración como se dice en voz alta: números en palabras ("mil metros", no "1,000 m"), sin siglas raras ni símbolos.
 - Producción en MODO GRATIS: los visuales serán clips de stock (Pixabay), no video generado.
-  Por eso cada escena debe incluir "busqueda_stock": 2 a 4 palabras en inglés, concretas y fáciles de encontrar
-  en stock (ej. "deep ocean dark water", "ancient ruins aerial"). Evita rostros concretos y escenas imposibles.
-  Cada búsqueda debe nombrar el SUJETO concreto que se ve (el animal, objeto o lugar exacto: "opossum lying",
-  no "animal lying"); nunca uses términos genéricos solos ("animal", "person", "thing"). Si la escena es abstracta,
-  busca el sujeto principal del video.
+  Añade en la raíz del guion "sujeto_stock": la lista de 1 a 3 sustantivos en inglés, en singular, que se ven en
+  pantalla durante el video (ej. ["crow", "raven"] para cuervos, ["octopus"], ["volcano", "lava"]).
+  Cada escena debe incluir "busqueda_stock": 2 o 3 palabras en inglés que EMPIECEN por uno de esos sujetos y
+  describan solo lo que la cámara ve (ej. "crow flock tree", "crow flying", "crow ground"). Prohibido:
+  palabras abstractas (learning, intelligence, strategy, memory, communication, threat), personas (silhouette,
+  watcher, scientist, face, people), y escenas imposibles de filmar. Si la narración es abstracta, muestra al
+  sujeto haciendo algo simple (posado, volando, mirando, en grupo). Varía la acción entre escenas.
   Mantén igualmente "prompt_visual" (requerido por el esquema).
 - "personajes" puede ir vacío ([]) si no hay figuras recurrentes. "clips_short": [] (el video ya es un Short).
 - Incluye "#Shorts" al final de metadatos.descripcion. "divulgacion_ia": true (la voz es sintética).
