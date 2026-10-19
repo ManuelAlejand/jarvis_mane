@@ -81,15 +81,23 @@ export function HudView({ s, onGo }: { s: JarvisState; onGo: (v: string) => void
 
 /* ---------------------------- Proyectos ---------------------------- */
 export function ProjectsView({ s }: { s: JarvisState }) {
+  const [openId, setOpenId] = useState<string | null>(null);
+  const open = s.projects.find((p) => p.id === openId);
+  if (open) return <ProjectDetail s={s} projectId={open.id} onBack={() => setOpenId(null)} />;
+
+  const order = { activo: 0, idea: 1, pausado: 2, terminado: 3 } as const;
+  const sorted = [...s.projects].sort((a, b) => order[a.status] - order[b.status]);
+
   return (
     <div className="grid" style={{ gap: 14 }}>
       <h1>Proyectos</h1>
       <div className="grid grid-2">
-        {s.projects.map((p) => {
+        {sorted.map((p) => {
           const pts = s.tasks.filter((t) => t.project_id === p.id);
           const progress = projectProgress(p.id, s.tasks, p.progress);
+          const running = pts.filter((t) => t.status === "en_curso").length;
           return (
-            <article key={p.id} className="panel">
+            <button key={p.id} className="panel project-card" onClick={() => setOpenId(p.id)} aria-label={`Abrir ${p.name}`}>
               <div className="panel-title">
                 <h2>{p.name}</h2>
                 <span className={`chip ${p.status}`}>{p.status}</span>
@@ -99,9 +107,9 @@ export function ProjectsView({ s }: { s: JarvisState }) {
               <div className="bar" aria-label={`Avance ${progress}%`}><span style={{ width: `${progress}%` }} /></div>
               <div className="card-meta small muted">
                 <span><span className="num">{progress}%</span> completado</span>
-                <span>{pts.filter((t) => t.status !== "hecha").length} abiertas · {pts.length} total</span>
+                <span>{running ? `${running} en curso · ` : ""}{pts.filter((t) => t.status !== "hecha").length} abiertas</span>
               </div>
-            </article>
+            </button>
           );
         })}
       </div>
@@ -109,6 +117,104 @@ export function ProjectsView({ s }: { s: JarvisState }) {
     </div>
   );
 }
+
+/* ------------------------ Detalle de proyecto ------------------------ */
+const DETAIL_GROUPS: { status: TaskStatus; label: string; open: boolean }[] = [
+  { status: "en_curso", label: "En curso ahora", open: true },
+  { status: "bloqueada", label: "Bloqueadas", open: true },
+  { status: "backlog", label: "Pendientes", open: false },
+  { status: "hecha", label: "Hechas", open: false },
+];
+
+function ProjectDetail({ s, projectId, onBack }: { s: JarvisState; projectId: string; onBack: () => void }) {
+  const p = s.projects.find((x) => x.id === projectId)!;
+  const pts = s.tasks.filter((t) => t.project_id === projectId);
+  const progress = projectProgress(p.id, s.tasks, p.progress);
+  const isAdmin = s.me?.role === "admin";
+
+  return (
+    <div className="grid" style={{ gap: 16 }}>
+      <div>
+        <button className="btn btn-ghost" onClick={onBack} style={{ minHeight: 36, padding: "4px 12px" }}>Volver a proyectos</button>
+      </div>
+      <section className="panel">
+        <div className="panel-title">
+          <h1>{p.name}</h1>
+          <span className={`chip ${p.status}`}>{p.status}</span>
+        </div>
+        <p className="small muted" style={{ marginBottom: 10 }}>{SCOPE_LABEL[p.scope]}</p>
+        {p.summary && <p style={{ marginBottom: 16, maxWidth: "70ch" }}>{p.summary}</p>}
+        <div className="bar"><span style={{ width: `${progress}%` }} /></div>
+        <p className="small muted" style={{ marginTop: 8 }}>
+          <span className="num">{progress}%</span> completado · {pts.filter((t) => t.status === "hecha").length} de {pts.length} tareas
+        </p>
+      </section>
+
+      {DETAIL_GROUPS.map((g) => {
+        const items = pts.filter((t) => t.status === g.status).sort((a, b) => a.priority - b.priority || a.ref - b.ref);
+        if (!items.length && g.status !== "en_curso") return null;
+        return (
+          <details key={g.status} className="group" open={g.open || undefined}>
+            <summary><h2>{g.label}</h2><span className="num muted">{items.length}</span></summary>
+            {items.length ? (
+              <div className="grid" style={{ gap: 10, marginTop: 12 }}>
+                {items.map((t) => (
+                  <TaskDetail key={t.id} t={t} s={s} canEdit={isAdmin || t.assignee === s.me?.id} />
+                ))}
+              </div>
+            ) : (
+              <p className="empty">Nada en curso. Mueve una tarea a «En curso» desde el tablero o con /mover.</p>
+            )}
+          </details>
+        );
+      })}
+    </div>
+  );
+}
+
+function TaskDetail({ t, s, canEdit }: { t: Task; s: JarvisState; canEdit: boolean }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(t.description ?? "");
+  const owner = s.profiles.find((x) => x.id === t.assignee);
+  const save = async () => {
+    await s.updateTask(t.id, { description: draft.trim() || null });
+    setEditing(false);
+  };
+
+  return (
+    <article className={`card p${t.priority}`} style={{ cursor: "default", marginBottom: 0 }}>
+      <div className="card-meta" style={{ marginTop: 0, alignItems: "flex-start" }}>
+        <div className="card-title" style={{ fontWeight: 500 }}>{t.title}</div>
+        <span className="num small muted">#{t.ref}</span>
+      </div>
+      <div className="objective">
+        <span className="small muted">Objetivo</span>
+        {editing ? (
+          <>
+            <textarea className="field" rows={3} value={draft} onChange={(e) => setDraft(e.target.value)} placeholder="Qué debe lograr esta tarea y cómo sabremos que está lista" />
+            <div className="row" style={{ marginTop: 8 }}>
+              <button className="btn" onClick={save}>Guardar objetivo</button>
+              <button className="btn btn-ghost" onClick={() => { setDraft(t.description ?? ""); setEditing(false); }}>Cancelar</button>
+            </div>
+          </>
+        ) : t.description ? (
+          <p>{t.description}</p>
+        ) : (
+          <p className="muted">Sin objetivo definido.</p>
+        )}
+        {!editing && canEdit && (
+          <button className="link-btn" onClick={() => setEditing(true)}>{t.description ? "Editar objetivo" : "Agregar objetivo"}</button>
+        )}
+      </div>
+      <div className="card-meta small muted">
+        <span>{PRIORITY_TEXT[t.priority]}{t.tags.length ? ` · ${t.tags.map((g) => `#${g}`).join(" ")}` : ""}</span>
+        <span>{owner?.full_name ?? (owner ? "Equipo" : "Sin asignar")} · {timeAgo(t.updated_at)}</span>
+      </div>
+    </article>
+  );
+}
+
+const PRIORITY_TEXT: Record<number, string> = { 1: "Prioridad alta", 2: "Prioridad media", 3: "Prioridad baja" };
 
 /* ----------------------------- Kanban ----------------------------- */
 export function KanbanView({ s }: { s: JarvisState }) {

@@ -146,6 +146,16 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .chip.pausado { color: var(--gold); border-color: rgba(232, 176, 75, 0.45); }
 .chip.terminado { color: var(--ok); border-color: rgba(111, 227, 168, 0.45); }
 
+.project-card { display: block; width: 100%; text-align: left; border: 0; color: inherit; font: inherit; cursor: pointer; }
+.project-card:hover::after { box-shadow: inset 0 0 0 1px rgba(127, 227, 255, 0.55); }
+.group > summary { list-style: none; cursor: pointer; display: flex; align-items: baseline; justify-content: space-between; padding: 8px 2px; border-bottom: 1px solid var(--line); }
+.group > summary::-webkit-details-marker { display: none; }
+.group > summary h2::before { content: "▸"; display: inline-block; width: 1.1em; color: var(--arc); transition: transform 150ms; }
+.group[open] > summary h2::before { transform: rotate(90deg); }
+.objective { margin-top: 10px; padding: 10px 12px; background: rgba(10, 23, 36, 0.6); border-left: 2px solid var(--arc-dim); display: grid; gap: 4px; }
+.objective p { max-width: 70ch; }
+.link-btn { background: none; border: 0; padding: 0; color: var(--arc); cursor: pointer; justify-self: start; font-size: 0.85rem; }
+
 /* ---------- Kanban ---------- */
 .board-tools { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 14px; }
 .board {
