@@ -29,6 +29,7 @@ export const BOT_COMMANDS = [
   { command: "mover", description: "Cambiar estado: /mover 12 en_curso" },
   { command: "proyecto", description: "Detalle de un proyecto" },
   { command: "gasto", description: "Gasto de API del mes" },
+  { command: "tendencias", description: "5 ideas basadas en lo más visto hoy" },
   { command: "agentes", description: "Quién está trabajando y en qué" },
   { command: "videos", description: "Shorts en el estudio" },
   { command: "reintentar", description: "Relanzar un Short: /reintentar V1" },

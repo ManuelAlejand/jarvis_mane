@@ -169,38 +169,46 @@ def main() -> None:
     registro = leer_json(ruta_reg) if ruta_reg.exists() else {}
     usados = {v["id"] for v in registro.values() if "id" in v}
 
+    # Cortes rápidos: varios clips por escena (escena_XX.mp4, escena_XX_2.mp4, …); el montaje los alterna
+    por_escena = max(1, int(env("CLIPS_POR_ESCENA", "2") or 2))
     total = len(g["escenas"])
     faltan = []
     for i, e in enumerate(g["escenas"], 1):
         if solo and e["n"] not in solo:
             continue
-        destino = clips / f"{nombre_escena(e['n'])}.mp4"
-        if destino.exists() and not forzar:
-            continue
-        anterior = registro.get(str(e["n"]), {}).get("id")
         print(f"PROGRESO Clips {i}/{total}", flush=True)
-        elegido = None
-        for consulta in consultas(g, e, idea):
-            for c in buscar(consulta, vertical):
-                if c["id"] in usados or c["id"] == anterior or c["duracion"] < min(e["duracion_seg"], 4):
-                    continue
-                a = mejor_archivo(c, vertical)
-                if a:
-                    elegido = (c, a, consulta)
+        for k in range(1, por_escena + 1):
+            sufijo = "" if k == 1 else f"_{k}"
+            clave = str(e["n"]) + sufijo
+            destino = clips / f"{nombre_escena(e['n'])}{sufijo}.mp4"
+            if destino.exists() and not forzar:
+                continue
+            anterior = registro.get(clave, {}).get("id")
+            # Clips de 2–3 s bastan para los cortes extra; el principal debe cubrir la escena
+            min_dur = min(e["duracion_seg"], 4) if k == 1 else 2
+            elegido = None
+            for consulta in consultas(g, e, idea):
+                for c in buscar(consulta, vertical):
+                    if c["id"] in usados or c["id"] == anterior or c["duracion"] < min_dur:
+                        continue
+                    a = mejor_archivo(c, vertical)
+                    if a:
+                        elegido = (c, a, consulta)
+                        break
+                if elegido:
                     break
-            if elegido:
-                break
-        if not elegido:
-            print(f"  escena {e['n']}: sin clip de stock", flush=True)
-            faltan.append(e["n"])
-            continue
-        c, a, consulta = elegido
-        descargar(a["url"], destino)
-        usados.add(c["id"])
-        registro[str(e["n"])] = {"id": c["id"], "proveedor": proveedor, "url": c["pagina"], "autor": c["autor"],
-                                 "consulta": consulta, "resolucion": f"{a['w']}x{a['h']}"}
-        escribir_json(ruta_reg, registro)
-        print(f"  escena {e['n']}: «{consulta}» → {c['id']} ({a['w']}x{a['h']})", flush=True)
+            if not elegido:
+                if k == 1:
+                    print(f"  escena {e['n']}: sin clip de stock", flush=True)
+                    faltan.append(e["n"])
+                break  # sin clip principal no hay escena; sin clip extra, la escena usa uno solo
+            c, a, consulta = elegido
+            descargar(a["url"], destino)
+            usados.add(c["id"])
+            registro[clave] = {"id": c["id"], "proveedor": proveedor, "url": c["pagina"], "autor": c["autor"],
+                               "consulta": consulta, "resolucion": f"{a['w']}x{a['h']}"}
+            escribir_json(ruta_reg, registro)
+            print(f"  escena {clave}: «{consulta}» → {c['id']} ({a['w']}x{a['h']})", flush=True)
 
     registrar_produccion(proyecto, "clips", {"motor": proveedor, "faltantes": faltan, "licencia": LICENCIA[proveedor]})
     if faltan:

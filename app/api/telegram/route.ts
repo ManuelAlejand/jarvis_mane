@@ -5,6 +5,7 @@ import { route } from "@/lib/router";
 import { applyPendingChange, handleCallback } from "@/lib/studio";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 60; // los agentes del servidor terminan su trabajo con after()
 
 interface TgUpdate {
   message?: { chat: { id: number }; from?: { id: number; first_name?: string }; text?: string; voice?: unknown };

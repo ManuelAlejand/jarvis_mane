@@ -246,8 +246,15 @@ Lee {carpeta / 'nicho.json'}: la idea elegida por el usuario está en "idea".
 
 FORMATO OBLIGATORIO: YouTube Short — este encargo reemplaza las reglas de video largo del guionista.
 - "formato": "short", "aspect_ratio": "9:16", idioma = "{idea.get('idioma', 'es')}".
-- Duración total entre 30 y 55 segundos: 5 a 9 escenas de 5 s (usa 10 s solo si la narración lo exige).
-- Narración: máximo 12 palabras por escena de 5 s. Gancho potente en la primera escena, sin saludos.
+- Duración total entre 60 y 75 segundos: 12 a 15 escenas de 5 s (usa 10 s solo si la narración lo exige).
+- Narración: entre 10 y 12 palabras por escena de 5 s (ritmo ágil, sin relleno).
+- Estructura con tensión, no una lista de datos:
+  1) Gancho (escena 1): una pregunta o dato imposible de ignorar, sin saludos.
+  2) Contexto rápido (2-3 escenas) que plantea un misterio o pregunta abierta.
+  3) Primer giro hacia la mitad ("pero aquí está lo extraño…").
+  4) Escalada con 2-3 datos sorprendentes y concretos.
+  5) Revelación o respuesta en las últimas 3 escenas.
+  6) Cierre que conecte con el gancho (invita a volver a verlo) o una pregunta para comentarios.
   Escribe la narración como se dice en voz alta: números en palabras ("mil metros", no "1,000 m"), sin siglas raras ni símbolos.
 - Producción en MODO GRATIS: los visuales serán clips de stock (Pixabay), no video generado.
   Por eso cada escena debe incluir "busqueda_stock": 2 a 4 palabras en inglés, concretas y fáciles de encontrar
@@ -275,7 +282,7 @@ def instrucciones_validador(carpeta: Path) -> str:
     return f"""Actúa como el subagente `validador` definido en .claude/agents/validador.md (usa la herramienta Agent/Task con subagent_type "validador" si está disponible; si no, sigue tú mismo ese archivo).
 
 Proyecto (ruta absoluta): {carpeta}
-Es un YouTube Short (9:16, menos de 60 s) producido en modo gratis: los visuales son clips de stock de Pixabay o Pexels
+Es un YouTube Short (9:16, de 60 a 75 s; YouTube admite hasta 3 min) producido en modo gratis: los visuales son clips de stock de Pixabay o Pexels
 (registrados en clips/stock.json, licencias libres con uso comercial) y la voz es Kokoro (sintética, licencia Apache-2.0).
 No penalices que los clips sean de stock; sí revisa que encajen con la narración, que no muestren marcas,
 logos, texto legible ajeno ni personas reconocibles, y que el conjunto aporte valor original.
@@ -574,6 +581,15 @@ def probar() -> None:
         chequeo("Kokoro (voz) instalado", True)
     except ImportError:
         chequeo("Kokoro (voz) instalado", False, "pip install -r requirements.txt")
+    if (os.environ.get("VOZ_MOTOR") or "kokoro").lower() == "chatterbox":
+        try:
+            import torch  # noqa: PLC0415
+            import chatterbox.mtl_tts  # noqa: F401, PLC0415
+            chequeo("Chatterbox (voz natural) instalado", True)
+            chequeo("GPU NVIDIA disponible para Chatterbox", torch.cuda.is_available(),
+                    "instala PyTorch con CUDA (README → Voz natural); mientras tanto usará la CPU, mucho más lento")
+        except Exception:  # noqa: BLE001
+            chequeo("Chatterbox (voz natural) instalado", False, "README → Voz natural. Mientras tanto se usa Kokoro")
     chequeo("espeak-ng (voz en español/portugués)", bool(shutil.which("espeak-ng")) or Path(r"C:\Program Files\eSpeak NG").exists(),
             "instala el .msi de github.com/espeak-ng/espeak-ng/releases")
     chequeo("YouTube autorizado (para publicar)", (RAIZ / os.environ.get("YOUTUBE_TOKEN", "credenciales/token.json")).exists(),

@@ -7,3 +7,6 @@ __pycache__/
 puente.log
 *.part
 cache/
+assets/musica/*.mp3
+assets/musica/*.wav
+assets/voces/*.wav

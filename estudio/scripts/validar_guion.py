@@ -91,8 +91,8 @@ def validar(ruta: Path, comparar: Path | None) -> dict:
     dur = sum(e["duracion_seg"] for e in esc)
     if g["formato"] == "largo" and dur < 180:
         avisos.append(f"video largo de solo {dur}s; < 3 min suele rendir peor en RPM")
-    if g["formato"] == "short" and dur > 60:
-        errores.append(f"formato short pero dura {dur}s (> 60)")
+    if g["formato"] == "short" and dur > 180:  # YouTube admite Shorts de hasta 3 min
+        errores.append(f"formato short pero dura {dur}s (> 180)")
     if len(g["metadatos"]["titulo_youtube"]) > 70:
         avisos.append("titulo_youtube > 70 caracteres; se corta en móviles")
     if not g["divulgacion_ia"]:

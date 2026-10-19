@@ -2,6 +2,8 @@ import "server-only";
 import { adminClient, log } from "@/lib/supabase/admin";
 import { aiAvailable, BudgetExceeded, classify, RateLimited, type Classification } from "@/lib/ai";
 import { findAgent, listAgents, matchAgentByKeyword, startRun } from "@/lib/agents";
+import { runExplorador } from "@/lib/trends";
+import { after } from "next/server";
 import type { Project, Task, TaskStatus } from "@/lib/types";
 import { STATUS_LABEL } from "@/lib/types";
 
@@ -48,6 +50,7 @@ const HELP = [
   "/mover 12 en_curso — backlog · en_curso · bloqueada · hecha",
   "/proyecto [nombre] — detalle (sin nombre: lista)",
   "/gasto — gasto de API del mes",
+  "/tendencias — 5 ideas basadas en lo más visto hoy",
   "/agentes — quién está trabajando y en qué",
   "/videos — Shorts en el estudio y su estado",
   "/reintentar V1 — relanzar un Short que falló",
@@ -95,6 +98,10 @@ export async function route(input: string, actor: Actor): Promise<Reply> {
         return await gasto();
       case "agentes":
         return await agentes();
+      case "tendencias": {
+        after(() => runExplorador({ chatIds: actor.chatId ? [actor.chatId] : undefined, source: actor.source }).then(() => undefined));
+        return { text: "📈 El <b>Explorador</b> está revisando lo más visto en YouTube hoy (CO, MX, ES, US). Te llegan 5 ideas con botones en unos segundos." };
+      }
       case "reintentar":
         return await reintentar(args, actor);
       case "videos":
@@ -132,6 +139,7 @@ function shortcut(raw: string): [string, string] {
     return what ? ["proyecto", what] : ["estado", ""];
   }
   if (/^(estado|resumen|status)$/.test(t)) return ["estado", ""];
+  if (/^(tendencias|que esta de moda|que es tendencia|lo mas visto)/.test(t)) return ["tendencias", ""];
   if (/(gasto|cuanto (llevo|he gastado|gastamos)|presupuesto)/.test(t)) return ["gasto", ""];
   if (/^(ayuda|comandos|help)$/.test(t)) return ["ayuda", ""];
   return ["_inbox", raw];

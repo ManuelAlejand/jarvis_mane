@@ -15,7 +15,7 @@ python scripts/validar_video.py <proyecto>
 ```
 El primero revisa esquema, tiempos de narración, temas sensibles y similitud con guiones
 anteriores. El segundo usa ffprobe/ffmpeg: duración vs guion, pistas de audio/video,
-resolución, frames negros, silencios largos, Shorts ≤ 60 s y 9:16.
+resolución, frames negros, silencios largos, Shorts ≤ 3 min y 9:16.
 
 ## 2. Revisión editorial (tú, leyendo el guion)
 - **Exactitud:** verifica con WebSearch 3–5 afirmaciones clave. Marca cualquier dato dudoso.

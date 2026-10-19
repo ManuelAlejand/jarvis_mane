@@ -64,6 +64,11 @@ export async function startRun(
   opts: { requestedBy: string | null; source: string; chatId?: number | null },
 ): Promise<{ ok: boolean; text: string }> {
   if (!agent.enabled) return { ok: false, text: `${esc(agent.name)} (${esc(agent.role)}) está desactivado.` };
+  if (agent.slug === "explorador") {
+    const { runExplorador } = await import("@/lib/trends");
+    after(() => runExplorador({ chatIds: opts.chatId ? [opts.chatId] : undefined, source: opts.source }).then(() => undefined));
+    return { ok: true, text: "📈 El <b>Explorador</b> está revisando lo más visto en YouTube hoy. Te llegan 5 ideas con botones en unos segundos." };
+  }
   const db = adminClient();
   const waiting =
     agent.runtime === "chat" ? "Esperando al chat de Claude" : agent.runtime === "local" ? "Esperando al motor local" : "En cola";

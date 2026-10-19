@@ -39,6 +39,25 @@ python puente.py              # deja esta ventana abierta: el PC queda escuchand
 
 Para actualizar el estudio: `git pull` en la carpeta `jarvis_mane`.
 
+### Voz natural (Chatterbox, recomendado)
+Chatterbox Multilingual (licencia MIT) suena mucho más humano que Kokoro y usa tu tarjeta NVIDIA.
+Si no está instalado o falla, el estudio usa Kokoro automáticamente.
+
+```powershell
+python -m pip install chatterbox-tts
+python -c "import torch; print(torch.__version__, torch.cuda.is_available())"
+```
+Si la segunda línea termina en `False`, instala la versión con CUDA de esa misma versión de PyTorch
+(cambia `2.6.0` por la que mostró el comando, sin el `+cpu`):
+```powershell
+python -m pip install --force-reinstall --no-deps torch==2.6.0 torchaudio==2.6.0 --index-url https://download.pytorch.org/whl/cu124
+```
+La primera vez descarga el modelo (unos GB). Para una voz propia, mira `assets/voces/LEEME.md`.
+
+### Música
+Copia 10 a 15 pistas instrumentales sin copyright en `assets/musica/` (cómo conseguirlas: `assets/musica/LEEME.md`).
+El montaje baja la música cuando hay voz y normaliza el audio a -14 LUFS.
+
 **Publicar en YouTube** (cuando vayas a subir el primer Short): sigue "Claves que necesitas → YouTube"
 más abajo y ejecuta `python scripts/autorizar_youtube.py` una vez.
 
@@ -47,7 +66,7 @@ más abajo y ejecuta `python scripts/autorizar_youtube.py` una vez.
 |---|---|---|---|
 | Ideas | Investigador (Sonnet) | Servidor JARVIS (API) | ~0.02 USD |
 | Guion | Guionista | Claude Code en este PC (plan Pro) | 0 |
-| Voz | Kokoro-82M (Apache-2.0, uso comercial) | Este PC | 0 |
+| Voz | Chatterbox (MIT) o Kokoro-82M (Apache-2.0), uso comercial | Este PC (GPU) | 0 |
 | Clips | Pixabay o Pexels (licencias libres, uso comercial) | Este PC | 0 |
 | Montaje y subtítulos | ffmpeg | Este PC | 0 |
 | Validación (máx. 2 rondas de corrección) | Validador | Claude Code en este PC | 0 |

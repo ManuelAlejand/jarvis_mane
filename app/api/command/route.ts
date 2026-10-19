@@ -3,6 +3,7 @@ import { adminClient } from "@/lib/supabase/admin";
 import { route } from "@/lib/router";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 60; // los agentes del servidor terminan su trabajo con after()
 
 /** Consola del dashboard: mismo router que Telegram, autenticado con la sesión de Supabase. */
 export async function POST(req: NextRequest) {

@@ -2,7 +2,7 @@
 
 Uso: python scripts/validar_video.py proyectos/<id> [--fotogramas N]
 Revisa: pistas de audio/video, resolución, duración vs narración, frames negros,
-silencios largos, subtítulos, Shorts (≤ 60 s y vertical). Con --fotogramas extrae N
+silencios largos, subtítulos, Shorts (≤ 3 min y vertical). Con --fotogramas extrae N
 imágenes a qa/ para revisión visual.
 """
 import json
@@ -96,7 +96,7 @@ def main() -> None:
         res["video"]["advertencias"].append("sin archivo de subtítulos")
 
     for s in sorted((proyecto / "shorts").glob("short_*.mp4")):
-        res["shorts"].append(revisar(s, (1080, 1920), 60.0))
+        res["shorts"].append(revisar(s, (1080, 1920), 180.0))
 
     if "--fotogramas" in sys.argv and final.exists():
         n = int(sys.argv[sys.argv.index("--fotogramas") + 1])
