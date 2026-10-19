@@ -12,3 +12,5 @@ numpy>=1.26
 num2words>=0.5.13
 # Subtítulos sincronizados con el audio real (MIT). Descarga un modelo pequeño la primera vez.
 faster-whisper>=1.1
+# perth (marca de agua de Chatterbox) necesita pkg_resources, que setuptools 81+ ya no incluye
+setuptools<81

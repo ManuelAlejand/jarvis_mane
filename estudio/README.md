@@ -44,7 +44,7 @@ Chatterbox Multilingual (licencia MIT) suena mucho más humano que Kokoro y usa 
 Si no está instalado o falla, el estudio usa Kokoro automáticamente.
 
 ```powershell
-python -m pip install chatterbox-tts
+python -m pip install chatterbox-tts "setuptools<81"
 python -c "import torch; print(torch.__version__, torch.cuda.is_available())"
 ```
 Si la segunda línea termina en `False`, instala la versión con CUDA de esa misma versión de PyTorch
