@@ -467,7 +467,7 @@ async function reintentar(args: string, actor: Actor): Promise<Reply> {
   const db = adminClient();
   const { data: v } = await db.from("videos").select("id,ref,titulo,estado").eq("ref", ref).maybeSingle();
   if (!v) return { text: `No existe el video V${ref}.` };
-  if (!["error", "revision"].includes(v.estado)) return { text: `V${ref} está «${VIDEO_TXT[v.estado] ?? v.estado}»: no hace falta relanzarlo.` };
+  if (!["error", "revision", "descartado"].includes(v.estado)) return { text: `V${ref} está «${VIDEO_TXT[v.estado] ?? v.estado}»: no hace falta relanzarlo.` };
   await db.from("videos").update({ estado: "guion_pendiente", error: null, intentos: 0, veredicto: null, fase_detalle: "En cola (reintento)" }).eq("id", v.id);
   await log(actor.source, `V${ref} relanzado`);
   return { text: `🔁 <code>V${ref}</code> «${esc(v.titulo)}» vuelve a la cola. Tu PC lo tomará en unos segundos.` };
