@@ -80,32 +80,60 @@ def _oir(audio: str, idioma: str) -> list[tuple[str, float, float]]:
     return [(w.word.strip(), float(w.start), float(w.end)) for s in segmentos for w in (s.words or [])]
 
 
-def tiempos_todas(escenas: list[tuple[Path, str, float]], idioma: str) -> list[list[tuple[str, float, float]] | None] | None:
-    """Para cada (audio, texto, duración): palabras del guion con tiempos reales. None si Whisper no está o falla.
+def oir_archivos(audios: list[Path], idioma: str) -> list[list[tuple[str, float, float]]] | None:
+    """Lo que Whisper oye en cada audio: [(palabra, inicio, fin)]. None si Whisper no está, falla o se cuelga.
 
-    Corre en un proceso aparte con tiempo límite: un cuelgue o cierre de Whisper no detiene el montaje.
+    Corre en un proceso aparte con tiempo límite: un cuelgue o cierre de Whisper no detiene a quien lo llama.
     """
-    if (env("SUBTITULOS_SINCRONIA", "whisper") or "whisper").lower() != "whisper" or not escenas:
-        return None
+    if not audios:
+        return []
     limite = int(env("WHISPER_TIMEOUT_SEG", "300") or 300)
-    entrada = json.dumps({"idioma": idioma, "audios": [str(a) for a, _, _ in escenas]})
+    entrada = json.dumps({"idioma": idioma, "audios": [str(a) for a in audios]})
     try:
         r = subprocess.run([sys.executable, __file__, "--oir"], input=entrada, capture_output=True, text=True,
                            encoding="utf-8", errors="replace", timeout=limite, cwd=Path(__file__).parent,
                            env={**os.environ, "PYTHONIOENCODING": "utf-8"})
     except subprocess.TimeoutExpired:
-        print(f"  (Whisper tardó más de {limite} s; subtítulos con tiempos estimados)", flush=True)
+        print(f"  (Whisper tardó más de {limite} s)", flush=True)
         return None
     marca = next((l for l in reversed(r.stdout.splitlines()) if l.startswith("OIDAS ")), None)
     if r.returncode != 0 or not marca:
-        print(f"  (Whisper no disponible, código {r.returncode}: {(r.stderr or r.stdout)[-200:].strip()}; "
-              "subtítulos con tiempos estimados)", flush=True)
+        print(f"  (Whisper no disponible, código {r.returncode}: {(r.stderr or r.stdout)[-200:].strip()})", flush=True)
         return None
-    oidas_por_escena = json.loads(marca[6:])
-    out: list[list[tuple[str, float, float]] | None] = []
-    for (_, texto, dur), oidas in zip(escenas, oidas_por_escena):
-        out.append(alinear(texto.split(), [tuple(o) for o in oidas], dur) if oidas else None)
-    return out
+    return [[tuple(o) for o in oidas] for oidas in json.loads(marca[6:])]
+
+
+def tiempos_todas(escenas: list[tuple[Path, str, float]], idioma: str) -> list[list[tuple[str, float, float]] | None] | None:
+    """Para cada (audio, texto, duración): palabras del guion con tiempos reales. None → tiempos estimados."""
+    if (env("SUBTITULOS_SINCRONIA", "whisper") or "whisper").lower() != "whisper" or not escenas:
+        return None
+    oidas_por_escena = oir_archivos([a for a, _, _ in escenas], idioma)
+    if oidas_por_escena is None:
+        print("  (subtítulos con tiempos estimados)", flush=True)
+        return None
+    return [alinear(texto.split(), oidas, dur) if oidas else None
+            for (_, texto, dur), oidas in zip(escenas, oidas_por_escena)]
+
+
+def revisar_locucion(texto: str, oidas: list[tuple[str, float, float]]) -> str | None:
+    """Compara lo que dice el guion con lo que se oye. Devuelve el problema encontrado o None si está bien."""
+    a = [w for w in (_norm(p) for p in texto.split()) if w]
+    b = [w for w in (_norm(p) for p, _, _ in oidas) if w]
+    if not b:
+        return "no se oye nada"
+    for i in range(len(b) - 2):  # "de de de": la misma palabra 3 veces seguidas
+        if b[i] == b[i + 1] == b[i + 2] and not any(a[j] == a[j + 1] == a[j + 2] for j in range(len(a) - 2)):
+            return f"repite «{b[i]}»"
+    for i in range(len(b) - 1):  # tartamudeo de una palabra corta que el guion no tiene repetida
+        if b[i] == b[i + 1] and not any(a[j] == a[j + 1] for j in range(len(a) - 1)):
+            return f"repite «{b[i]}»"
+    parecido = difflib.SequenceMatcher(a=a, b=b, autojunk=False).ratio()
+    if parecido < 0.7:  # margen para errores normales de Whisper; los saltos grandes sí se detectan
+        return f"no dice el texto ({parecido:.0%} parecido)"
+    huecos = [oidas[k + 1][1] - oidas[k][2] for k in range(len(oidas) - 1)]
+    if huecos and max(huecos) > 1.2:
+        return f"silencio de {max(huecos):.1f} s a mitad de frase"
+    return None
 
 
 def _proceso_oir() -> None:

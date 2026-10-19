@@ -315,7 +315,7 @@ def producir(video: dict, carpeta: Path, solo: list[int] | None = None) -> None:
     reportar(video["id"], estado="produciendo", agente="productor", paso="Preparando producción", fase_detalle="Preparando producción")
     if solo is None:
         try:
-            correr([PY, "scripts/generar_voz.py", str(carpeta)], video, "productor", "Voz")
+            correr([PY, "scripts/generar_voz.py", str(carpeta)], video, "productor", "Voz", timeout=1200)
         except Fallo as e:
             # Si el motor de voz se cae (p. ej. Chatterbox cierra Python en Windows), se rehace con Kokoro
             # en un proceso nuevo para que el video no se detenga. Se rehacen todas las escenas para que la voz sea una sola.
