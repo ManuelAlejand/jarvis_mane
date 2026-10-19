@@ -259,6 +259,9 @@ FORMATO OBLIGATORIO: YouTube Short — este encargo reemplaza las reglas de vide
 - Producción en MODO GRATIS: los visuales serán clips de stock (Pixabay), no video generado.
   Por eso cada escena debe incluir "busqueda_stock": 2 a 4 palabras en inglés, concretas y fáciles de encontrar
   en stock (ej. "deep ocean dark water", "ancient ruins aerial"). Evita rostros concretos y escenas imposibles.
+  Cada búsqueda debe nombrar el SUJETO concreto que se ve (el animal, objeto o lugar exacto: "opossum lying",
+  no "animal lying"); nunca uses términos genéricos solos ("animal", "person", "thing"). Si la escena es abstracta,
+  busca el sujeto principal del video.
   Mantén igualmente "prompt_visual" (requerido por el esquema).
 - "personajes" puede ir vacío ([]) si no hay figuras recurrentes. "clips_short": [] (el video ya es un Short).
 - Incluye "#Shorts" al final de metadatos.descripcion. "divulgacion_ia": true (la voz es sintética).

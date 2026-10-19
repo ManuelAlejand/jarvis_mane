@@ -19,6 +19,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 from comun import (carpeta_proyecto, duracion, env, ffmpeg, leer_json,  # noqa: E402
                    nombre_escena, registrar_produccion, resolucion, RAIZ)
+from tiempos_palabras import tiempos_escena  # noqa: E402 — tiempos reales por palabra (Whisper)
 
 RESPIRO = 0.35   # segundos de silencio al final de cada escena
 FPS = 30
@@ -42,13 +43,18 @@ def ts_ass(seg: float) -> str:
     return f"{h}:{m:02d}:{s:02d}.{cs:02d}"
 
 
-def palabras_con_tiempo(linea: list[dict]) -> list[list[tuple[str, float, float]]]:
-    """Por escena: (palabra, inicio, fin) estimados; cada palabra pesa según sus letras (+1 por la pausa)."""
-    out = []
+def palabras_con_tiempo(linea: list[dict], idioma: str) -> tuple[list[list[tuple[str, float, float]]], str]:
+    """Por escena: (palabra, inicio, fin). Tiempos reales con Whisper si está; si no, estimados por letras."""
+    out, metodo = [], "estimado"
     for esc in linea:
         frase = []
         palabras = esc["narracion"].split()
         if not palabras or esc["dur_audio"] <= 0:
+            continue
+        reales = tiempos_escena(Path(esc["audio"]), esc["narracion"], idioma, esc["dur_audio"]) if esc.get("audio") else None
+        if reales:
+            metodo = "whisper"
+            out.append([(p, esc["inicio"] + a, esc["inicio"] + min(b, esc["dur_audio"])) for p, a, b in reales])
             continue
         pesos = [len(re.sub(r"\W", "", p)) + 1 for p in palabras]
         total = sum(pesos)
@@ -58,15 +64,24 @@ def palabras_con_tiempo(linea: list[dict]) -> list[list[tuple[str, float, float]
             frase.append((p, t, t + d))
             t += d
         out.append(frase)
-    return out
+    return out, metodo
 
 
-def lineas(escenas: list[list[tuple[str, float, float]]], por_linea: int) -> list[list[tuple[str, float, float]]]:
-    """Agrupa palabras en líneas sin mezclar escenas; evita dejar una palabra sola al final."""
+def lineas(escenas: list[list[tuple[str, float, float]]], por_linea: int,
+           max_letras: int = 99) -> list[list[tuple[str, float, float]]]:
+    """Agrupa palabras en líneas cortas (máx. palabras y letras) sin mezclar escenas ni dejar una palabra huérfana."""
     out = []
     for frase in escenas:
-        grupos = [frase[i:i + por_linea] for i in range(0, len(frase), por_linea)]
-        if len(grupos) > 1 and len(grupos[-1]) == 1:
+        grupos, actual = [], []
+        for w in frase:
+            largo = len(" ".join(p for p, _, _ in actual + [w]))
+            if actual and (len(actual) >= por_linea or largo > max_letras):
+                grupos.append(actual)
+                actual = []
+            actual.append(w)
+        if actual:
+            grupos.append(actual)
+        if len(grupos) > 1 and len(grupos[-1]) == 1 and len(" ".join(p for p, _, _ in grupos[-2] + grupos[-1])) <= max_letras + 4:
             grupos[-2] += grupos.pop()
         out += grupos
     return out
@@ -81,25 +96,26 @@ def construir_srt(escenas: list[list[tuple[str, float, float]]], por_linea: int)
 
 def construir_ass(escenas: list[list[tuple[str, float, float]]], w: int, h: int, vertical: bool) -> str:
     """Karaoke: cada línea muestra 2–3 palabras; la que suena pasa a amarillo (\\k)."""
-    tam = 96 if vertical else 64
-    margen = int(h * 0.30) if vertical else 70
+    # Celular: letra grande pero con margen lateral, salto de línea automático y líneas de ≤ 16 letras
+    tam = 82 if vertical else 64
+    margen = int(h * 0.28) if vertical else 70
     cab = f"""[Script Info]
 ScriptType: v4.00+
 PlayResX: {w}
 PlayResY: {h}
-WrapStyle: 2
+WrapStyle: 0
 ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Karaoke,Arial Black,{tam},&H0000E5FF,&H00FFFFFF,&H00000000,&H64000000,-1,0,0,0,100,100,0,0,1,6,3,2,60,60,{margen},1
+Style: Karaoke,Arial Black,{tam},&H0000E5FF,&H00FFFFFF,&H00000000,&H64000000,-1,0,0,0,100,100,0,0,1,6,3,2,90,90,{margen},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
-    por_linea = 3 if vertical else 6
+    por_linea, max_letras = (3, 16) if vertical else (6, 40)
     eventos = []
-    for grupo in lineas(escenas, por_linea):
+    for grupo in lineas(escenas, por_linea, max_letras):
         inicio, fin = grupo[0][1], grupo[-1][2]
         partes = []
         for p, a, b in grupo:
@@ -173,6 +189,7 @@ def main() -> None:
         segmento(clips, audio, dur, w, h, seg)
         real = duracion(seg)
         linea.append({"n": e["n"], "inicio": round(t, 3), "fin": round(t + real, 3), "clips": len(clips),
+                      "audio": str(audio) if audio else None,
                       "dur_audio": round(dur_audio, 3), "narracion": e["narracion"]})
         t += real
 
@@ -180,10 +197,11 @@ def main() -> None:
     lista.write_text("".join(f"file '{(tmp / (nombre_escena(e['n']) + '.mp4')).as_posix()}'\n"
                              for e in g["escenas"]), encoding="utf-8")
     unido = tmp / "unido.mp4"
-    ffmpeg("-f", "concat", "-safe", "0", "-i", str(lista), "-c", "copy", str(unido))
+    ffmpeg("-f", "concat", "-safe", "0", "-i", str(lista), "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", str(unido))
     total = duracion(unido)
 
-    palabras = palabras_con_tiempo(linea)
+    palabras, sincronia = palabras_con_tiempo(linea, g.get("idioma", "es"))
+    print(f"  Subtítulos: tiempos {sincronia}", flush=True)
     srt = proyecto / "final" / "subtitulos.srt"
     srt.write_text(construir_srt(palabras, 4 if vertical else 8), encoding="utf-8")
     ass = proyecto / "final" / "subtitulos.ass"
@@ -194,17 +212,21 @@ def main() -> None:
     # Música: solo pistas con licencia en assets/musica (ver assets/musica/LEEME.md)
     pistas = sorted((RAIZ / "assets" / "musica").glob("*.mp3"))
     musica = random.choice(pistas) if pistas else None
-    vol = float(env("VOLUMEN_MUSICA", "0.35"))  # nivel de la música SIN voz; con voz baja más por el ducking
+    # Nivel de la música respecto a la voz cuando NO hay narración (dB). Bajo la voz baja ~6 dB más (ducking).
+    rel_db = float(env("MUSICA_DB_BAJO_VOZ", "-12"))
     final = proyecto / "final" / "video.mp4"
     salida_audio = ["-c:a", "aac", "-b:a", "192k", "-ar", "48000"]
+    # Voz y música se nivelan POR SEPARADO (voz a -16 LUFS, música a -16+rel) y luego se mezclan:
+    # así la distancia entre ambas no depende de lo fuerte o suave que salga cada motor de voz o pista.
+    voz_norm = "loudnorm=I=-16:TP=-1.5:LRA=11"
     if musica:
         fade_out = max(0.0, total - 2.0)
         filtro = (
             f"[0:v]{filtro_v}[vout];"
-            f"[0:a]asplit=2[voz][ref];"
-            f"[1:a]volume={vol},afade=t=in:d=1.5,afade=t=out:st={fade_out:.2f}:d=2[mus];"
-            # La música se comprime cuando la voz suena (sidechain): queda de fondo y vuelve en las pausas
-            f"[mus][ref]sidechaincompress=threshold=0.02:ratio=10:attack=15:release=350:makeup=1[musduck];"
+            f"[0:a]{voz_norm},asplit=2[voz][ref];"
+            f"[1:a]loudnorm=I={-16 + rel_db:.1f}:TP=-3,afade=t=in:d=1.5,afade=t=out:st={fade_out:.2f}:d=2[mus];"
+            # La música se comprime mientras suena la voz (sidechain) y vuelve en las pausas
+            f"[mus][ref]sidechaincompress=threshold=0.08:ratio=4:attack=25:release=450:makeup=1[musduck];"
             f"[voz][musduck]amix=inputs=2:duration=first:normalize=0,"
             f"loudnorm=I=-14:TP=-1.5:LRA=11[aout]"
         )
@@ -212,13 +234,13 @@ def main() -> None:
                "-map", "[vout]", "-map", "[aout]", "-t", f"{total:.3f}", "-c:v", "libx264", "-preset", "medium",
                "-crf", "20", *salida_audio, "-movflags", "+faststart", str(final))
     else:
-        ffmpeg("-i", str(unido), "-filter_complex", f"[0:v]{filtro_v}[vout];[0:a]loudnorm=I=-14:TP=-1.5:LRA=11[aout]",
+        ffmpeg("-i", str(unido), "-filter_complex", f"[0:v]{filtro_v}[vout];[0:a]{voz_norm},loudnorm=I=-14:TP=-1.5:LRA=11[aout]",
                "-map", "[vout]", "-map", "[aout]", "-c:v", "libx264", "-preset", "medium", "-crf", "20",
                *salida_audio, "-movflags", "+faststart", str(final))
 
     registrar_produccion(proyecto, "ensamblado", {
         "video": str(final), "duracion_seg": round(duracion(final), 2),
-        "resolucion": f"{w}x{h}", "subtitulos": "karaoke" if subs else None,
+        "resolucion": f"{w}x{h}", "subtitulos": f"karaoke ({sincronia})" if subs else None,
         "musica": musica.name if musica else None, "cortes": sum(x["clips"] for x in linea), "linea_tiempo": linea,
     })
     print(f"Video final: {final} ({duracion(final):.1f}s, {sum(x['clips'] for x in linea)} cortes"

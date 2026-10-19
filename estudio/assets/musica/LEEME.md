@@ -18,4 +18,5 @@ Evita pistas marcadas con "Content ID".
 ## Reglas
 - Solo instrumentales (sin letra): la letra compite con la narración.
 - No subas estas pistas a GitHub (ya están excluidas en `.gitignore`).
-- Ajusta el nivel con `VOLUMEN_MUSICA` en `.env` (0.35 por defecto; más alto = música más presente en las pausas).
+- Ajusta el nivel con `MUSICA_DB_BAJO_VOZ` en `.env` (-12 por defecto; -9 = más presente, -15 = más suave).
+- Prefiere pistas con melodía en tonos medios o agudos: los graves casi no se oyen en el parlante del celular.

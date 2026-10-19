@@ -71,9 +71,8 @@ def buscar_pixabay(consulta: str, vertical: bool) -> list[dict]:
         archivos = [{"url": v["url"], "w": v["width"], "h": v["height"], "mb": (v.get("size") or 0) / 1e6}
                     for v in (h.get("videos") or {}).values() if v.get("url") and v.get("width")]
         out.append({"id": f"pixabay-{h['id']}", "duracion": h.get("duration", 0), "pagina": h.get("pageURL"),
-                    "autor": h.get("user"), "archivos": archivos})
-    # Primero los verticales (si los hay), luego el resto
-    return sorted(out, key=lambda c: 0 if any(a["h"] > a["w"] for a in c["archivos"]) == vertical else 1)
+                    "autor": h.get("user"), "archivos": archivos, "tags": h.get("tags", "")})
+    return out  # en el orden de relevancia de Pixabay
 
 
 def buscar_pexels(consulta: str, vertical: bool) -> list[dict]:
@@ -90,14 +89,49 @@ def buscar_pexels(consulta: str, vertical: bool) -> list[dict]:
         for v in _cache(f"pexels|{orient}|{consulta}", cargar):
             archivos = [{"url": f["link"], "w": f["width"], "h": f["height"], "mb": 0}
                         for f in v.get("video_files", []) if f.get("file_type") == "video/mp4" and f.get("width")]
+            # Pexels no da etiquetas; la URL de la página trae el título del clip ("…/video/deep-ocean-fish-123/")
             out.append({"id": f"pexels-{v['id']}", "duracion": v.get("duration", 0), "pagina": v.get("url"),
-                        "autor": (v.get("user") or {}).get("name"), "archivos": archivos})
+                        "autor": (v.get("user") or {}).get("name"), "archivos": archivos,
+                        "tags": re.sub(r"[-/\d]+", " ", (v.get("url") or "").split("/video/")[-1])})
     return out
 
 
 PROVEEDORES = {"pixabay": buscar_pixabay, "pexels": buscar_pexels}
 LICENCIA = {"pixabay": "Pixabay Content License (uso comercial, sin atribución obligatoria)",
             "pexels": "Pexels License (uso comercial, sin atribución obligatoria)"}
+
+
+HUMANOS = {"man", "woman", "people", "person", "girl", "boy", "child", "kid", "baby", "men", "women", "human",
+           "face", "portrait", "model", "couple", "family", "businessman", "lady", "guy", "crowd", "selfie", "hand", "hands"}
+VACIAS = {"a", "an", "the", "of", "in", "on", "at", "and", "with", "close", "up", "closeup", "view", "shot", "slow",
+          "motion", "video", "footage", "aerial", "dark", "light", "background", "4k", "hd"}
+
+
+def palabras(texto: str) -> set[str]:
+    return {w for w in re.findall(r"[a-z]+", texto.lower()) if len(w) > 2 and w not in VACIAS}
+
+
+def relevante(c: dict, consulta: str, estricto: bool = True) -> bool:
+    """El clip debe compartir al menos una palabra con la búsqueda y no mostrar personas si no se pidieron."""
+    etiquetas = palabras(c.get("tags", ""))
+    buscadas = palabras(consulta)
+    if not etiquetas:
+        return True  # sin etiquetas no se puede juzgar; se confía en el orden del buscador
+    singular = {w.rstrip("s") for w in buscadas}
+    if estricto and not (buscadas & etiquetas or singular & {w.rstrip("s") for w in etiquetas}):
+        return False
+    if etiquetas & HUMANOS and not buscadas & HUMANOS:
+        return False
+    return True
+
+
+def ordenar(candidatos: list[dict], vertical: bool, top: int = 6) -> list[dict]:
+    """Respeta la relevancia del buscador; dentro de los primeros `top`, adelanta los verticales."""
+    if not vertical:
+        return candidatos
+    es_v = lambda c: any(a["h"] > a["w"] for a in c["archivos"])  # noqa: E731
+    cabeza = candidatos[:top]
+    return [c for c in cabeza if es_v(c)] + [c for c in cabeza if not es_v(c)] + candidatos[top:]
 
 
 def mejor_archivo(c: dict, vertical: bool) -> dict | None:
@@ -187,13 +221,19 @@ def main() -> None:
             # Clips de 2–3 s bastan para los cortes extra; el principal debe cubrir la escena
             min_dur = min(e["duracion_seg"], 4) if k == 1 else 2
             elegido = None
-            for consulta in consultas(g, e, idea):
-                for c in buscar(consulta, vertical):
-                    if c["id"] in usados or c["id"] == anterior or c["duracion"] < min_dur:
-                        continue
-                    a = mejor_archivo(c, vertical)
-                    if a:
-                        elegido = (c, a, consulta)
+            # 1ª pasada: etiquetas que coincidan con la búsqueda; 2ª: más flexible, pero nunca personas no pedidas
+            for estricto in (True, False):
+                for consulta in consultas(g, e, idea):
+                    for c in ordenar(buscar(consulta, vertical), vertical):
+                        if c["id"] in usados or c["id"] == anterior or c["duracion"] < min_dur:
+                            continue
+                        if not relevante(c, consulta, estricto):
+                            continue
+                        a = mejor_archivo(c, vertical)
+                        if a:
+                            elegido = (c, a, consulta)
+                            break
+                    if elegido:
                         break
                 if elegido:
                     break
