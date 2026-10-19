@@ -323,6 +323,10 @@ def escribir_guion(video: dict, carpeta: Path, correccion: str | None) -> dict:
         if intento == 2:
             raise Fallo("El guion sigue sin cumplir el formato tras 2 correcciones: " + "; ".join(errores[:5]))
         lista = "\n".join(f"- {x}" for x in errores[:40])
+        try:  # se guardan las búsquedas de stock por si la corrección las borra
+            busquedas = {e.get("n"): e.get("busqueda_stock") for e in leer_json(ruta).get("escenas", []) if e.get("busqueda_stock")}
+        except (json.JSONDecodeError, OSError):
+            busquedas = {}
         claude(f"""Corrige el archivo {ruta} para que cumpla EXACTAMENTE schemas/guion.schema.json.
 El validador encontró estos errores:
 {lista}
@@ -333,19 +337,70 @@ los campos que falten. Plantilla de referencia con los nombres de campo correcto
 
 Vuelve a validar con: python scripts/validar_guion.py "{ruta}" --comparar proyectos/
 Responde solo "listo" cuando no haya errores.""", video, "guionista", f"Corrigiendo formato del guion ({intento + 1}/2)", timeout=900)
+        if busquedas:
+            try:
+                g2 = leer_json(ruta)
+                for e in g2.get("escenas", []):
+                    if not e.get("busqueda_stock") and busquedas.get(e.get("n")):
+                        e["busqueda_stock"] = busquedas[e["n"]]
+                escribir_json(ruta, g2)
+            except (json.JSONDecodeError, OSError):
+                pass
 
     correr([PY, "scripts/estimar_costo.py", str(ruta), "--modo", video.get("modo") or "gratis"], video, "guionista", "Costo", ok_codes=(0, 2))
     g = leer_json(ruta)
     costo = leer_json(carpeta / "costo_estimado.json")
+    (carpeta / "guion.md").write_text(guion_markdown(g, video), encoding="utf-8")  # versión legible, 0 tokens
     resumen = {"titulo": g.get("titulo"), "gancho": g.get("gancho"), "escenas": len(g.get("escenas", [])),
                "segundos": sum(e.get("duracion_seg", 0) for e in g.get("escenas", [])), "idioma": g.get("idioma")}
+    narracion = "\n".join(f"<b>{e['n']}.</b> {esc(e.get('narracion', ''))}" for e in g.get("escenas", []))
+    aviso = (f"📝 <b>Guion listo</b> · <code>V{video['ref']}</code>\n<b>{esc(g.get('titulo', ''))}</b>\n"
+             f"{resumen['escenas']} escenas · ~{resumen['segundos']} s · idioma {g.get('idioma', '?')} · "
+             f"costo estimado ${costo.get('usd_total_estimado', 0)}\n\n{narracion}")
     reportar(video["id"], agente="guionista", fin=True, titulo=g.get("titulo") or video["titulo"],
              guion_resumen=resumen, costo_estimado_usd=costo.get("usd_total_estimado", 0),
              resumen=f"V{video['ref']}: guion de {resumen['escenas']} escenas (~{resumen['segundos']} s)",
-             notificar=(f"📝 <b>Guion listo</b> · <code>V{video['ref']}</code>\n<b>{esc(g.get('titulo', ''))}</b>\n"
-                        f"🪝 {esc(g.get('gancho', ''))}\n{resumen['escenas']} escenas · ~{resumen['segundos']} s · "
-                        f"costo estimado ${costo.get('usd_total_estimado', 0)}\nProduciendo el video…"))
+             notificar=aviso[:3800] + "\n\n<i>Produciendo el video…</i>")
     return g
+
+
+def guion_markdown(g: dict, video: dict) -> str:
+    """Guion en texto legible para revisarlo en el PC o en Telegram (sin pasar por la IA)."""
+    m = g.get("metadatos", {})
+    lineas = [
+        f"# {g.get('titulo', video['titulo'])}",
+        "",
+        f"- Video: V{video['ref']} · Idioma: {g.get('idioma', '?')} · Formato: {g.get('formato', 'short')} {g.get('aspect_ratio', '9:16')}",
+        f"- Nicho: {g.get('nicho', '')}",
+        f"- Duración aproximada: {sum(e.get('duracion_seg', 0) for e in g.get('escenas', []))} s en {len(g.get('escenas', []))} escenas",
+        "",
+        f"**Gancho:** {g.get('gancho', '')}",
+        "",
+        f"**Aporte original:** {g.get('aporte_original', '')}",
+        "",
+        "## Escenas",
+        "",
+        "| # | Seg | Narración | Clip de stock |",
+        "|---|---|---|---|",
+    ]
+    for e in g.get("escenas", []):
+        narr = str(e.get("narracion", "")).replace("|", "/").replace("\n", " ")
+        lineas.append(f"| {e.get('n')} | {e.get('duracion_seg')} | {narr} | {e.get('busqueda_stock', '')} |")
+    lineas += [
+        "",
+        "## YouTube",
+        "",
+        f"**Título:** {m.get('titulo_youtube', '')}",
+        "",
+        f"**Descripción:**\n\n{m.get('descripcion', '')}",
+        "",
+        f"**Etiquetas:** {', '.join(m.get('tags', []))}",
+        "",
+        "## Fuentes",
+        "",
+        *[f"- {f.get('titulo', '')} {f.get('url', '')}".strip() for f in g.get("fuentes", []) if isinstance(f, dict)],
+    ]
+    return "\n".join(lineas) + "\n"
 
 
 def validar(video: dict, carpeta: Path) -> dict:
@@ -358,6 +413,11 @@ def validar(video: dict, carpeta: Path) -> dict:
     veredicto = str(rep.get("veredicto", "RECHAZADO")).upper()
     veredicto = "APROBADO" if veredicto.startswith("APROB") else "RECHAZADO"
     rep["veredicto"] = veredicto
+    try:  # a veces el validador puntúa de 0 a 10: se lleva a 0-100
+        p = float(rep.get("puntaje", 0))
+        rep["puntaje"] = round(p * 10) if 0 < p <= 10 else round(p)
+    except (TypeError, ValueError):
+        pass
     escribir_json(ruta, rep)
     problemas = rep.get("problemas", [])
     reportar(video["id"], agente="validador", fin=True, veredicto=veredicto, problemas=problemas,
@@ -402,6 +462,13 @@ def enviar_para_revision(video: dict, carpeta: Path, rep: dict) -> None:
     if not r.ok:
         log(f"  Telegram rechazó el video: {r.text[:300]}")
         reportar(video["id"], notificar=texto + "\n\n(No pude adjuntar el video; revísalo en el PC.)")
+    # El guion legible como adjunto (enviar archivos no gasta tokens)
+    md = carpeta / "guion.md"
+    if md.exists():
+        with open(md, "rb") as f:
+            requests.post(f"https://api.telegram.org/bot{TG_TOKEN}/sendDocument", timeout=60,
+                          data={"chat_id": chat, "caption": f"📄 Guion de V{video['ref']} · carpeta {carpeta.name}"},
+                          files={"document": (f"guion_V{video['ref']}.md", f, "text/markdown")})
 
 
 def limpiar_produccion(carpeta: Path) -> None:

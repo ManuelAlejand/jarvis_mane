@@ -151,9 +151,18 @@ export async function executeRun(runId: string): Promise<"done" | "paused" | "er
     await db.from("agent_runs").update({ current_step: `Trabajando en: ${claimed.input.slice(0, 80)}` }).eq("id", runId);
 
     const structured = agent.slug === "investigador";
+    let system = agent.system_prompt;
+    if (structured) {
+      const { data: pref } = await db.from("settings").select("value").eq("key", "studio_idioma").maybeSingle();
+      const idioma = String(pref?.value ?? "es");
+      const nombre = { es: "español", en: "inglés", pt: "portugués" }[idioma] ?? idioma;
+      system =
+        `${INVESTIGADOR_PROMPT}\n\nIdioma por defecto del canal: ${nombre} (${idioma}). ` +
+        `Usa ese idioma y su mercado salvo que la orden pida otro idioma explícitamente; en la comparación de mercados explica qué se gana o pierde frente a los otros.`;
+    }
     const { text, cost } = await callClaude({
       model: agent.model,
-      system: structured ? INVESTIGADOR_PROMPT : agent.system_prompt,
+      system,
       maxTokens: Math.max(agent.max_tokens, structured ? 2000 : 0),
       schema: structured ? INVESTIGADOR_SCHEMA : undefined,
       agentRunId: runId,
