@@ -73,6 +73,19 @@ async function handle(req: NextRequest) {
     .limit(BATCH);
   if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
 
+  // Red de seguridad: órdenes de agentes del servidor que quedaron en cola más de 1 minuto
+  const { data: api } = await db.from("agents").select("id").eq("runtime", "api").eq("enabled", true);
+  const { data: stuck } = await db
+    .from("agent_runs")
+    .select("id")
+    .in("agent_id", (api ?? []).map((a) => a.id))
+    .eq("status", "queued")
+    .lte("created_at", new Date(Date.now() - 60_000).toISOString())
+    .order("created_at")
+    .limit(3);
+  const rescued: string[] = [];
+  for (const r of stuck ?? []) rescued.push(`${r.id}:${await executeRun(r.id)}`);
+
   const results: { id: string; status: string }[] = [];
   for (const job of (jobs ?? []) as Job[]) {
     // Reclamar el trabajo (evita doble ejecución si dos crons coinciden)
@@ -116,7 +129,7 @@ async function handle(req: NextRequest) {
       results.push({ id: job.id, status: failed ? "failed" : isLimit ? "paused" : "pending" });
     }
   }
-  return NextResponse.json({ ok: true, processed: results.length, results });
+  return NextResponse.json({ ok: true, processed: results.length, results, rescued });
 }
 
 export const POST = handle;

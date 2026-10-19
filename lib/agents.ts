@@ -92,7 +92,9 @@ export async function startRun(
   }
 
   // Ejecutar en segundo plano, después de responder a Telegram / la Consola
-  after(() => executeRun(run.id).catch(() => undefined));
+  after(() =>
+    executeRun(run.id).catch((e) => log("agent", `${agent.name} no pudo arrancar: ${e instanceof Error ? e.message : e}`, "error")),
+  );
 
   const busy = agent.status === "working" ? " Está terminando otra orden; esta va justo después." : "";
   return {
@@ -108,14 +110,23 @@ async function setAgent(agentId: string, patch: Record<string, unknown>) {
 /** Ejecuta un run. Seguro de llamar varias veces: solo uno lo "reclama". */
 export async function executeRun(runId: string): Promise<"done" | "paused" | "error" | "skipped"> {
   const db = adminClient();
-  const { data: pre } = await db.from("agent_runs").select("agents(runtime)").eq("id", runId).maybeSingle();
+  // agents↔agent_runs tienen dos relaciones (agent_id y current_run_id): hay que nombrar la correcta
+  const { data: pre, error: preErr } = await db
+    .from("agent_runs")
+    .select("agents!agent_runs_agent_id_fkey(runtime)")
+    .eq("id", runId)
+    .maybeSingle();
+  if (preErr) {
+    await log("agent", `No pude leer la orden ${runId}: ${preErr.message}`, "error");
+    return "error";
+  }
   if ((pre as unknown as { agents: { runtime: string } } | null)?.agents?.runtime !== "api") return "skipped";
   const { data: claimed } = await db
     .from("agent_runs")
     .update({ status: "running", started_at: new Date().toISOString(), current_step: "Preparando contexto" })
     .eq("id", runId)
     .in("status", ["queued", "paused"])
-    .select("id,input,source_chat,agent_id,agents(*)")
+    .select("id,input,source_chat,agent_id,agents!agent_runs_agent_id_fkey(*)")
     .maybeSingle();
   if (!claimed) return "skipped";
 

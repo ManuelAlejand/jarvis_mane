@@ -47,7 +47,7 @@ export async function POST(req: NextRequest) {
     runId = run.id;
   }
 
-  const { data: run } = await db.from("agent_runs").select("id,agent_id,source_chat,started_at,agents(name)").eq("id", runId).maybeSingle();
+  const { data: run } = await db.from("agent_runs").select("id,agent_id,source_chat,started_at,agents!agent_runs_agent_id_fkey(name)").eq("id", runId).maybeSingle();
   if (!run) return NextResponse.json({ ok: false, error: "Run no existe" }, { status: 404 });
   const agentName = (run as unknown as { agents: { name: string } }).agents?.name ?? "Agente";
 
