@@ -161,6 +161,83 @@ def preparar_carpeta(video: dict) -> Path:
     return carpeta
 
 
+PLANTILLA_GUION = """{
+  "id": "v1-the-ocean-zone",
+  "titulo": "The Ocean Zone Where Sunlight Never Arrives",
+  "idioma": "en",
+  "mercado": ["US", "UK"],
+  "nicho": "Deep ocean mysteries",
+  "formato": "short",
+  "aspect_ratio": "9:16",
+  "gancho": "Dive 1,000 meters down and the sun simply stops existing.",
+  "aporte_original": "Explica en 40 segundos, con datos verificados, por qué la zona de medianoche es el hábitat más grande del planeta y casi inexplorado.",
+  "estilo_visual": "dark cinematic underwater footage",
+  "personajes": [],
+  "escenas": [
+    {"n": 1, "narracion": "Dive 1,000 meters down and the sun simply stops existing.",
+     "prompt_visual": "Sunlight rays fading into deep blue ocean water, camera descending",
+     "busqueda_stock": "deep ocean sunlight rays", "duracion_seg": 5}
+  ],
+  "clips_short": [],
+  "metadatos": {
+    "titulo_youtube": "The Ocean Zone Where Sunlight Never Arrives",
+    "descripcion": "Texto de 2-3 frases con el dato central y las fuentes... #Shorts",
+    "tags": ["deep ocean", "midnight zone", "ocean facts"],
+    "categoria_id": "27"
+  },
+  "divulgacion_ia": true,
+  "fuentes": [{"titulo": "NOAA Ocean Exploration", "url": "https://oceanexplorer.noaa.gov/"}]
+}"""
+
+# Nombres de campo equivocados que los modelos suelen usar → nombre correcto del esquema
+ALIAS_ESCENA = {"numero": "n", "num": "n", "number": "n", "duracion": "duracion_seg", "duration": "duracion_seg",
+                "segundos": "duracion_seg", "naracion": "narracion", "narration": "narracion", "texto": "narracion",
+                "visual": "prompt_visual", "prompt": "prompt_visual", "stock": "busqueda_stock"}
+ALIAS_META = {"titulo": "titulo_youtube", "title": "titulo_youtube", "description": "descripcion",
+              "etiquetas": "tags", "categoria": "categoria_id", "category_id": "categoria_id"}
+
+
+def normalizar_guion(ruta: Path, carpeta: Path, video: dict) -> None:
+    """Arregla sin preguntar los errores de forma inequívocos (nombres de campo, tipos simples)."""
+    g = leer_json(ruta)
+    for i, e in enumerate(g.get("escenas", []), 1):
+        for viejo, nuevo in ALIAS_ESCENA.items():
+            if viejo in e and nuevo not in e:
+                e[nuevo] = e.pop(viejo)
+        e.setdefault("n", i)
+        try:
+            d = float(e.get("duracion_seg", 5))
+        except (TypeError, ValueError):
+            d = 5
+        e["duracion_seg"] = 10 if d > 7.5 else 5
+    meta = g.get("metadatos") or {}
+    for viejo, nuevo in ALIAS_META.items():
+        if viejo in meta and nuevo not in meta:
+            meta[nuevo] = meta.pop(viejo)
+    if meta:
+        meta.setdefault("titulo_youtube", g.get("titulo") or video["titulo"])
+        meta["categoria_id"] = str(meta.get("categoria_id", "27"))
+        g["metadatos"] = meta
+    nicho = leer_json(carpeta / "nicho.json") if (carpeta / "nicho.json").exists() else {}
+    g.setdefault("id", carpeta.name)
+    if not g.get("nicho") and nicho.get("nicho"):
+        g["nicho"] = nicho["nicho"]
+    if not g.get("gancho") and g.get("escenas"):
+        g["gancho"] = g["escenas"][0].get("narracion", "")
+    g.setdefault("formato", "short")
+    g.setdefault("aspect_ratio", "9:16")
+    g.setdefault("divulgacion_ia", True)
+    g.setdefault("clips_short", [])
+    g.setdefault("personajes", [])
+    escribir_json(ruta, g)
+
+
+def errores_guion(ruta: Path, video: dict) -> list[str]:
+    correr([PY, "scripts/validar_guion.py", str(ruta), "--comparar", "proyectos/"], video, "guionista", "Validar guion", ok_codes=(0, 1))
+    rep = ruta.parent / "qa" / "validacion_guion.json"
+    return leer_json(rep).get("errores", []) if rep.exists() else ["no se generó qa/validacion_guion.json"]
+
+
 def instrucciones_guion(carpeta: Path, idea: dict, correccion: str | None) -> str:
     base = f"""Actúa como el subagente `guionista` definido en .claude/agents/guionista.md (usa la herramienta Agent/Task con subagent_type "guionista" si está disponible; si no, sigue tú mismo ese archivo).
 
@@ -177,7 +254,12 @@ FORMATO OBLIGATORIO: YouTube Short — este encargo reemplaza las reglas de vide
   Mantén igualmente "prompt_visual" (requerido por el esquema).
 - "personajes" puede ir vacío ([]) si no hay figuras recurrentes. "clips_short": [] (el video ya es un Short).
 - Incluye "#Shorts" al final de metadatos.descripcion. "divulgacion_ia": true (la voz es sintética).
-- Escribe {carpeta / 'guion.json'} y valídalo con: python scripts/validar_guion.py "{carpeta / 'guion.json'}" --comparar proyectos/
+- Escribe {carpeta / 'guion.json'} siguiendo EXACTAMENTE schemas/guion.schema.json. Usa estos nombres de campo
+  tal cual (no los traduzcas ni los cambies: "n", "narracion", "duracion_seg", no "numero", "duracion" ni "narration"):
+
+{PLANTILLA_GUION}
+
+- Valídalo con: python scripts/validar_guion.py "{carpeta / 'guion.json'}" --comparar proyectos/
   Corrige hasta que no haya errores.
 Al terminar responde solo una línea: el título del Short."""
     if correccion:
@@ -226,7 +308,32 @@ def escribir_guion(video: dict, carpeta: Path, correccion: str | None) -> dict:
     ruta = carpeta / "guion.json"
     if not ruta.exists():
         raise Fallo("El guionista no escribió guion.json")
-    correr([PY, "scripts/validar_guion.py", str(ruta), "--comparar", "proyectos/"], video, "guionista", "Validar guion", ok_codes=(0, 1))
+
+    # El guion debe cumplir el esquema antes de producir: se normaliza y, si quedan errores,
+    # se le devuelven al Guionista (máx. 2 veces).
+    for intento in range(3):
+        try:
+            normalizar_guion(ruta, carpeta, video)
+        except (json.JSONDecodeError, OSError) as e:
+            errores = [f"guion.json no es un JSON válido: {e}"]
+        else:
+            errores = errores_guion(ruta, video)
+        if not errores:
+            break
+        if intento == 2:
+            raise Fallo("El guion sigue sin cumplir el formato tras 2 correcciones: " + "; ".join(errores[:5]))
+        lista = "\n".join(f"- {x}" for x in errores[:40])
+        claude(f"""Corrige el archivo {ruta} para que cumpla EXACTAMENTE schemas/guion.schema.json.
+El validador encontró estos errores:
+{lista}
+
+Conserva el contenido creativo (título, gancho, narración, búsquedas de stock); solo arregla la estructura y completa
+los campos que falten. Plantilla de referencia con los nombres de campo correctos:
+{PLANTILLA_GUION}
+
+Vuelve a validar con: python scripts/validar_guion.py "{ruta}" --comparar proyectos/
+Responde solo "listo" cuando no haya errores.""", video, "guionista", f"Corrigiendo formato del guion ({intento + 1}/2)", timeout=900)
+
     correr([PY, "scripts/estimar_costo.py", str(ruta), "--modo", video.get("modo") or "gratis"], video, "guionista", "Costo", ok_codes=(0, 2))
     g = leer_json(ruta)
     costo = leer_json(carpeta / "costo_estimado.json")

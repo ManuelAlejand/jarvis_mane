@@ -49,6 +49,8 @@ const HELP = [
   "/proyecto [nombre] — detalle (sin nombre: lista)",
   "/gasto — gasto de API del mes",
   "/agentes — quién está trabajando y en qué",
+  "/videos — Shorts en el estudio y su estado",
+  "/reintentar V1 — relanzar un Short que falló",
   "/agente investigador busca nichos de misterio — darle una orden",
   "",
   "También entiendo: <i>pendientes</i>, <i>cómo va todo</i>, <i>cómo va youtube</i>, <i>gasto</i>.",
@@ -93,6 +95,10 @@ export async function route(input: string, actor: Actor): Promise<Reply> {
         return await gasto();
       case "agentes":
         return await agentes();
+      case "reintentar":
+        return await reintentar(args, actor);
+      case "videos":
+        return await videos();
       case "agente": {
         const m = args.match(/^(\S+)\s+([\s\S]+)$/);
         if (!m) return { text: "Uso: /agente &lt;nombre&gt; &lt;orden&gt;. Ve los nombres con /agentes." };
@@ -418,6 +424,45 @@ async function agentes(): Promise<Reply> {
       }),
     ].join("\n"),
   };
+}
+
+const VIDEO_TXT: Record<string, string> = {
+  guion_pendiente: "en cola para el guion", guionando: "escribiendo el guion", cambios: "aplicando cambios",
+  produciendo: "produciendo", validando: "validando", revision: "listo para revisar", publicar: "en cola para subir",
+  publicando: "subiendo", publicado: "subido en privado", descartado: "descartado", error: "error",
+};
+
+async function videos(): Promise<Reply> {
+  const { data } = await adminClient()
+    .from("videos")
+    .select("ref,titulo,estado,fase_detalle,error")
+    .neq("estado", "descartado")
+    .order("created_at", { ascending: false })
+    .limit(10);
+  if (!data?.length) return { text: "Aún no hay Shorts. Pide ideas: <i>busca ideas de video sobre…</i>" };
+  return {
+    text: [
+      "<b>Shorts en el estudio</b>",
+      ...data.map(
+        (v) =>
+          `<code>V${v.ref}</code> ${esc(v.titulo)}\n    ${VIDEO_TXT[v.estado] ?? v.estado}` +
+          (v.estado === "error" && v.error ? ` — ${esc(String(v.error).slice(0, 90))}` : v.fase_detalle ? ` · ${esc(v.fase_detalle)}` : ""),
+      ),
+    ].join("\n"),
+  };
+}
+
+async function reintentar(args: string, actor: Actor): Promise<Reply> {
+  if (!actor.isAdmin) return { text: "Solo el admin puede relanzar videos." };
+  const ref = Number(args.replace(/^#?v/i, "").trim());
+  if (!ref) return { text: "Uso: /reintentar V1" };
+  const db = adminClient();
+  const { data: v } = await db.from("videos").select("id,ref,titulo,estado").eq("ref", ref).maybeSingle();
+  if (!v) return { text: `No existe el video V${ref}.` };
+  if (!["error", "revision"].includes(v.estado)) return { text: `V${ref} está «${VIDEO_TXT[v.estado] ?? v.estado}»: no hace falta relanzarlo.` };
+  await db.from("videos").update({ estado: "guion_pendiente", error: null, intentos: 0, veredicto: null, fase_detalle: "En cola (reintento)" }).eq("id", v.id);
+  await log(actor.source, `V${ref} relanzado`);
+  return { text: `🔁 <code>V${ref}</code> «${esc(v.titulo)}» vuelve a la cola. Tu PC lo tomará en unos segundos.` };
 }
 
 async function gasto(): Promise<Reply> {
