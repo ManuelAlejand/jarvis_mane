@@ -22,6 +22,8 @@ export interface Robot {
   alLlegar: (() => void) | null;
   proximoPaseo: number;
   ocupadoHasta: number; // mientras entrega algo no se sienta
+  /** Lleva un "paquete" holográfico en la mano (entregando trabajo) */
+  llevando: boolean;
 }
 
 const centro = (c: Celda) => ({ x: c.c + 0.5, z: c.r + 0.5 });
@@ -37,7 +39,7 @@ export class Mundo {
     const p = centro(puesto.silla);
     const r: Robot = {
       slug, sala, puesto, x: p.x, z: p.z, rot: Math.PI, ruta: [], trabajando, sentado: trabajando,
-      gesto: null, alLlegar: null, proximoPaseo: performance.now() + 4000 + Math.random() * 12000, ocupadoHasta: 0,
+      gesto: null, alLlegar: null, proximoPaseo: performance.now() + 4000 + Math.random() * 12000, ocupadoHasta: 0, llevando: false,
     };
     if (!trabajando) {
       const e = centro(puesto.entrega);
@@ -85,7 +87,9 @@ export class Mundo {
       return;
     }
     a.ocupadoHasta = performance.now() + 30000;
+    a.llevando = true;
     this.ir(a, b.puesto.entrega, () => {
+      a.llevando = false;
       a.rot = Math.atan2(centro(b.puesto.silla).x - a.x, centro(b.puesto.silla).z - a.z);
       this.gesto(de, "Wave", 2200);
       this.gesto(para, "Yes", 1800);

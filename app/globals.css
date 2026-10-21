@@ -325,3 +325,19 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .personalidad { color: var(--text); opacity: .85; font-style: italic; }
 .enlace { background: none; border: 0; padding: 0; color: var(--arc); cursor: pointer; font: inherit; text-align: left; }
 .enlace:hover { text-decoration: underline; }
+
+/* Arranque de la Oficina */
+.arranque {
+  position: absolute; inset: 0; z-index: 50; display: grid; place-content: center; justify-items: center; gap: 14px;
+  background: radial-gradient(circle at center, rgba(10, 40, 60, .92), #050c14 70%); pointer-events: none;
+  animation: arranque-salida .5s ease 1.7s forwards;
+}
+.arranque p { margin: 0; font: 600 14px var(--display); letter-spacing: .25em; color: var(--arc); text-transform: uppercase; }
+.arranque-reactor { position: relative; width: 120px; height: 120px; }
+.arranque-reactor i { position: absolute; inset: 0; border-radius: 50%; border: 2px solid var(--arc); border-top-color: transparent; animation: girar 1.2s linear infinite; box-shadow: 0 0 18px rgba(127,227,255,.5); }
+.arranque-reactor i:nth-child(2) { inset: 18px; border-color: var(--gold); border-left-color: transparent; animation-duration: .9s; animation-direction: reverse; }
+.arranque-reactor i:nth-child(3) { inset: 44px; background: #dff8ff; border: 0; box-shadow: 0 0 30px 8px rgba(127,227,255,.8); animation: latir 1s ease-in-out infinite; }
+@keyframes girar { to { transform: rotate(360deg); } }
+@keyframes latir { 50% { transform: scale(.8); opacity: .7; } }
+@keyframes arranque-salida { to { opacity: 0; visibility: hidden; } }
+@media (prefers-reduced-motion: reduce) { .arranque-reactor i { animation: none; } }

@@ -53,6 +53,11 @@ const enCurso = (r?: AgentRun) => r?.status === "running" || r?.status === "queu
 export function OficinaView({ s }: { s: JarvisState }) {
   const [seleccion, setSeleccion] = useState<string | null>(null);
   const [ajustar, setAjustar] = useState(0);
+  const [arrancando, setArrancando] = useState(true);
+  useEffect(() => {
+    const t = window.setTimeout(() => setArrancando(false), 2600);
+    return () => window.clearTimeout(t);
+  }, []);
   const [, setReloj] = useState(0);
   const notas = useRef(new Map<string, Nota>());
   const runsVistos = useRef<Map<string, AgentRun["status"]> | null>(null);
@@ -222,6 +227,7 @@ export function OficinaView({ s }: { s: JarvisState }) {
         emoji: a.emoji ?? null,
         lider: esLider,
         esJarvis: a.slug === "jarvis",
+        trabajando: trabajando(a),
         armadura: esLider ? 0 : 1 + (a.position % 5),
         globo: texto ? { texto: texto.length > 70 && !sel ? `${texto.slice(0, 67)}…` : texto, tipo: viva?.tipo ?? "trabajo" } : null,
         seleccionado: sel,
@@ -285,6 +291,12 @@ export function OficinaView({ s }: { s: JarvisState }) {
       </div>
 
       <div className="oficina-escena">
+        {arrancando && (
+          <div className="arranque" aria-hidden="true">
+            <div className="arranque-reactor"><i /><i /><i /></div>
+            <p>J.A.R.V.I.S. · inicializando la oficina</p>
+          </div>
+        )}
         <Escena
           plano={plano}
           mundo={mundo}

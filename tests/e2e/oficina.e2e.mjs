@@ -56,13 +56,13 @@ async function abrir(viewport) {
   await p.mouse.up({ button: "right" });
   ok("Se puede desplazar con clic derecho", true);
 
-  await p.locator(".oficina-capa .nombre", { hasText: "Validador" }).click();
+  await p.locator(".oficina-capa .nombre", { hasText: "Validador" }).dispatchEvent("click"); // la etiqueta se mueve con el robot
   await p.waitForSelector(".oficina-panel h3", { timeout: 5000 });
   ok("Al tocar un agente se abre su panel", (await p.textContent(".oficina-panel h3")).includes("Validador"));
   await p.click(".oficina-panel button[aria-label='Cerrar']");
   await p.click("text=Ver todo");
   await p.waitForTimeout(800);
-  await p.locator(".oficina-capa .nombre", { hasText: "F.R.I.D.A.Y." }).click();
+  await p.locator(".oficina-capa .nombre", { hasText: "F.R.I.D.A.Y." }).dispatchEvent("click");
   await p.waitForTimeout(600);
   const panelLider = await p.textContent(".oficina-panel");
   ok("El panel del líder muestra su equipo y personalidad", panelLider.includes("Su equipo") && panelLider.includes("Líder de sala") && panelLider.includes("Directora"));

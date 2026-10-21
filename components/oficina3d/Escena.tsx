@@ -3,7 +3,8 @@
  * Escena 3D de la Oficina (three.js + React Three Fiber + drei, MIT).
  * Robot: "RobotExpressive" de Tomás Laulhé / Quaternius (CC0), del repositorio de ejemplos de three.js.
  */
-import { OrbitControls, useAnimations, useGLTF } from "@react-three/drei";
+import { OrbitControls, Sparkles, useAnimations, useGLTF } from "@react-three/drei";
+import { Bloom, EffectComposer, Vignette } from "@react-three/postprocessing";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { Suspense, useEffect, useLayoutEffect, useMemo, useRef, type ReactNode } from "react";
 import type React from "react";
@@ -32,6 +33,7 @@ export interface InfoRobot {
   emoji: string | null;
   lider: boolean;
   esJarvis: boolean;
+  trabajando: boolean;
   armadura: number;
   globo: { texto: string; tipo: "trabajo" | "ok" | "error" | "frase" } | null;
   seleccionado: boolean;
@@ -56,8 +58,15 @@ interface Props {
 /** Etiquetas HTML ancladas a puntos 3D: se mueven en cada fotograma sin re-renderizar React. */
 type Anclas = Map<string, HTMLDivElement>;
 
+/** PC con mouse y pantalla grande: brillo (bloom) y más partículas. Celular: versión ligera. */
+function calidadAlta() {
+  if (typeof window === "undefined") return false;
+  return !window.matchMedia("(pointer: coarse)").matches && window.innerWidth >= 900;
+}
+
 export function Escena(props: Props) {
   const anclas = useRef<Anclas>(new Map());
+  const alta = useMemo(calidadAlta, []);
   const registrar = (clave: string) => (el: HTMLDivElement | null) => {
     if (el) anclas.current.set(clave, el);
     else anclas.current.delete(clave);
@@ -76,8 +85,14 @@ export function Escena(props: Props) {
       <hemisphereLight args={["#d6f0ff", "#0a1220", 0.9]} />
       <directionalLight position={[15, 30, 22]} intensity={1.8} />
       <directionalLight position={[-20, 15, -10]} intensity={0.5} color="#5fb8ff" />
-      <Contenido {...props} />
+      <Contenido {...props} alta={alta} />
       <Proyector plano={props.plano} mundo={props.mundo} anclas={anclas} />
+      {alta && (
+        <EffectComposer multisampling={0}>
+          <Bloom mipmapBlur intensity={0.85} luminanceThreshold={0.62} luminanceSmoothing={0.2} />
+          <Vignette eskil={false} offset={0.25} darkness={0.55} />
+        </EffectComposer>
+      )}
     </Canvas>
     <div className="oficina-capa">
       {props.plano.salas.map((sala) => (
@@ -138,7 +153,7 @@ function Proyector({ plano, mundo, anclas }: { plano: Plano; mundo: Mundo; ancla
   return null;
 }
 
-function Contenido({ plano, mundo, robots, puestosEncendidos, onSeleccionar, enfocar, ajustarClave }: Props) {
+function Contenido({ plano, mundo, robots, puestosEncendidos, onSeleccionar, enfocar, ajustarClave, alta }: Props & { alta: boolean }) {
   const centro = useMemo(() => new THREE.Vector3(plano.cols / 2, 0, plano.rows / 2), [plano]);
   return (
     <>
@@ -151,6 +166,9 @@ function Contenido({ plano, mundo, robots, puestosEncendidos, onSeleccionar, enf
             <Escritorio key={i} puesto={p} encendido={puestosEncendidos.has(p)} nucleo={s.tipo === "nucleo"} />
           ))}
           {s.holo && <MesaHolografica sala={s} />}
+          {s.holo && (
+            <Sparkles count={alta ? 60 : 25} scale={[5, 2.5, 5]} size={2.5} speed={0.35} color="#7fe3ff" position={[s.holo.c + 1, 1.5, s.holo.r + 1]} />
+          )}
         </group>
       ))}
       <Suspense fallback={null}>
@@ -159,6 +177,7 @@ function Contenido({ plano, mundo, robots, puestosEncendidos, onSeleccionar, enf
         ))}
       </Suspense>
       <MotorMundo mundo={mundo} />
+      <RelojHolograma />
     </>
   );
 }
@@ -400,10 +419,7 @@ function RobotAgente({ info, mundo, onSeleccionar }: { info: InfoRobot; mundo: M
       if (!mesh.isMesh) return;
       const base = mesh.material as THREE.MeshStandardMaterial;
       if (info.esJarvis) {
-        mesh.material = new THREE.MeshStandardMaterial({
-          color: "#8fe9ff", emissive: "#2bb8ff", emissiveIntensity: 1.1, transparent: true, opacity: 0.55,
-          metalness: 0.2, roughness: 0.2, depthWrite: false,
-        });
+        mesh.material = materialHolograma();
         return;
       }
       const mat = base.clone();
@@ -417,6 +433,17 @@ function RobotAgente({ info, mundo, onSeleccionar }: { info: InfoRobot; mundo: M
   }, [scene, info.esJarvis, info.armadura]);
   const { actions } = useAnimations(animations, grupo);
   const actual = useRef<Anim | null>(null);
+  const torso = useMemo(() => {
+    let hueso: THREE.Object3D | null = null;
+    modelo.traverse((o) => {
+      if (!hueso && o.name === "Torso" && (o as THREE.Bone).isBone) hueso = o;
+    });
+    return hueso as THREE.Object3D | null;
+  }, [modelo]);
+  const reactor = useRef<THREE.Group>(null);
+  const anillo = useRef<THREE.Group>(null);
+  const paquete = useRef<THREE.Mesh>(null);
+  const tmp = useMemo(() => new THREE.Vector3(), []);
 
   useFrame(() => {
     const r = mundo.robots.get(info.slug);
@@ -442,6 +469,22 @@ function RobotAgente({ info, mundo, onSeleccionar }: { info: InfoRobot; mundo: M
     }
     // el holograma de JARVIS flota un poco
     if (info.esJarvis) g.position.y = 0.06 + Math.sin(performance.now() / 600) * 0.04;
+    // reactor en el pecho: sigue al hueso del torso
+    if (torso && reactor.current) {
+      torso.getWorldPosition(tmp);
+      g.worldToLocal(tmp);
+      reactor.current.position.set(tmp.x, tmp.y + 0.05, tmp.z + 0.2);
+    }
+    const t = performance.now() / 1000;
+    if (anillo.current) {
+      anillo.current.visible = info.trabajando;
+      anillo.current.rotation.y = t * 1.4;
+    }
+    if (paquete.current) {
+      paquete.current.visible = r.llevando;
+      paquete.current.rotation.set(t * 2, t * 3, 0);
+      paquete.current.position.y = 1.0 + Math.sin(t * 5) * 0.04;
+    }
   });
 
   return (
@@ -455,6 +498,32 @@ function RobotAgente({ info, mundo, onSeleccionar }: { info: InfoRobot; mundo: M
       onPointerOut={() => (document.body.style.cursor = "")}
     >
       <primitive object={modelo} />
+      {!info.esJarvis && (
+        <group ref={reactor}>
+          <mesh>
+            <circleGeometry args={[0.07, 20]} />
+            <meshStandardMaterial color="#e6fbff" emissive="#7fe3ff" emissiveIntensity={3.2} side={THREE.DoubleSide} />
+          </mesh>
+          <mesh position={[0, 0, -0.005]}>
+            <ringGeometry args={[0.07, 0.1, 20]} />
+            <meshStandardMaterial color="#5a6670" metalness={0.8} roughness={0.3} side={THREE.DoubleSide} />
+          </mesh>
+        </group>
+      )}
+      <group ref={anillo} visible={false} position={[0, 0.03, 0]}>
+        <mesh rotation-x={-Math.PI / 2}>
+          <ringGeometry args={[0.62, 0.66, 48, 1, 0, Math.PI * 1.5]} />
+          <meshBasicMaterial color="#7fe3ff" transparent opacity={0.9} side={THREE.DoubleSide} toneMapped={false} />
+        </mesh>
+        <mesh rotation-x={-Math.PI / 2} rotation-z={Math.PI}>
+          <ringGeometry args={[0.72, 0.74, 48, 1, 0, Math.PI * 0.8]} />
+          <meshBasicMaterial color="#e8b04b" transparent opacity={0.8} side={THREE.DoubleSide} toneMapped={false} />
+        </mesh>
+      </group>
+      <mesh ref={paquete} visible={false} position={[0.28, 1.0, 0.3]}>
+        <boxGeometry args={[0.16, 0.16, 0.16]} />
+        <meshStandardMaterial color="#bff3ff" emissive="#36c9ff" emissiveIntensity={2.5} transparent opacity={0.85} />
+      </mesh>
       {/* zona de clic más grande que el robot */}
       <mesh position={[0, ALTURA_ROBOT / 2, 0]}>
         <cylinderGeometry args={[0.55, 0.55, ALTURA_ROBOT, 8]} />
@@ -475,6 +544,38 @@ function RobotAgente({ info, mundo, onSeleccionar }: { info: InfoRobot; mundo: M
       )}
     </group>
   );
+}
+
+/** Holograma de JARVIS: azul translúcido con líneas de escaneo que suben (shader inyectado en el material estándar). */
+const reloj = { value: 0 };
+let materialHolo: THREE.MeshStandardMaterial | null = null;
+function materialHolograma() {
+  if (materialHolo) return materialHolo;
+  const m = new THREE.MeshStandardMaterial({
+    color: "#8fe9ff", emissive: "#2bb8ff", emissiveIntensity: 1.3, transparent: true, opacity: 0.6,
+    metalness: 0.2, roughness: 0.2, depthWrite: false,
+  });
+  m.onBeforeCompile = (sh) => {
+    sh.uniforms.uTiempo = reloj;
+    sh.vertexShader = sh.vertexShader
+      .replace("#include <common>", "#include <common>\nvarying float vAltura;")
+      .replace("#include <skinning_vertex>", "#include <skinning_vertex>\nvAltura = (modelMatrix * vec4(transformed, 1.0)).y;");
+    sh.fragmentShader = sh.fragmentShader
+      .replace("#include <common>", "#include <common>\nvarying float vAltura;\nuniform float uTiempo;")
+      .replace(
+        "#include <dithering_fragment>",
+        "#include <dithering_fragment>\nfloat linea = smoothstep(0.35, 0.5, fract(vAltura * 22.0 - uTiempo * 1.6));\nfloat barrido = smoothstep(0.08, 0.0, abs(fract(uTiempo * 0.35) * 2.2 - vAltura));\ngl_FragColor.rgb += vec3(0.35, 0.8, 1.0) * (barrido * 1.5);\ngl_FragColor.a *= 0.45 + 0.55 * linea + barrido;",
+      );
+  };
+  materialHolo = m;
+  return m;
+}
+
+function RelojHolograma() {
+  useFrame(({ clock }) => {
+    reloj.value = clock.elapsedTime;
+  });
+  return null;
 }
 
 /** Rombo dorado flotando sobre la cabeza de los líderes de sala */
