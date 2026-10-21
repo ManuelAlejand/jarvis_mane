@@ -69,6 +69,8 @@ const HELP = [
   "/informe critico — el último informe completo de un agente (resumen + archivo)",
   "/agente critico valida la idea de la Auditoría GEO — Crítico: clientes simulados y veredicto",
   "/agente arquitecto haz el plano del módulo GEO en JARVIS — Arquitecto: plano técnico",
+  "/agente jefe-obra construye la fase A del plano — Taller: Jefe de obra con backend, frontend, pruebas, revisor y verificador",
+  "/agente forjador crea una skill para … — Forjador: busca si ya existe y si no, la crea",
   "",
   "También entiendo: <i>pendientes</i>, <i>cómo va todo</i>, <i>cómo va youtube</i>, <i>gasto</i>.",
   "Y texto libre: <i>recuérdame comprar el dominio, es urgente</i> 🧠",

@@ -8,6 +8,9 @@ Pide trabajo a JARVIS cada pocos segundos y lo ejecuta aquí:
   radar      → Radar: investiga nichos y locales (skill radar-nichos)
   critico    → Crítico: valida ideas con clientes simulados (skill validar-idea)
   arquitecto → Arquitecto: diseña el plano técnico (skill arquitecto-express)
+  forjador   → Forjador: crea skills nuevas (skill forjar-skill)
+  taller     → Jefe de obra + backend, frontend, pruebas, revisor y verificador construyen productos
+               en ../productos/<nombre> (repositorio aparte de JARVIS)
                (los tres con Claude Code y tu plan Pro: 0 USD de API)
 
 Uso (desde la carpeta del estudio):  python puente.py          # se queda escuchando
@@ -608,6 +611,11 @@ AGENTES_SKILL = {
                   "WebFetch sobre https://registry.npmjs.org/<paquete> o https://pypi.org/pypi/<paquete>/json."),
     },
 }
+AGENTES_SKILL["forjador"] = {
+    "skill": "forjar-skill", "carpeta": "forja", "archivos": ("SKILL.md", "forja.md"),
+    "paso": "Forjando la skill", "inicio": "Buscando si ya existe algo parecido",
+    "extra": "Escribe `SKILL.md` y `forja.md` en la carpeta de salida.",
+}
 SKILL_TIMEOUT = int(os.environ.get("SKILL_TIMEOUT_SEG", os.environ.get("RADAR_TIMEOUT_SEG", "2700")))  # 45 min
 
 
@@ -685,12 +693,180 @@ def procesar_skill(slug_agente: str, run: dict, contexto: dict | None) -> None:
         reportar_run(run["id"], status="error", summary=detalle[:300])
 
 
+# ----------------------------------------------------------------------------- Taller (construcción de productos)
+# El Jefe de obra trabaja en el repositorio del producto (fuera de JARVIS) con Claude Code y reparte pasos a sus
+# subagentes (backend, frontend, pruebas, revisor, verificador). Cada vez que llama a uno, el puente crea una orden
+# hija en JARVIS: en la Oficina se ve al Jefe entregarle el trabajo y al subagente sentarse a trabajar.
+
+TALLER = ("jefe-obra", "backend", "frontend", "pruebas", "revisor", "verificador")
+PRODUCTOS = Path(os.environ.get("PRODUCTOS_DIR") or (RAIZ.parent.parent / "productos"))
+PLANTILLA_TALLER = RAIZ / "plantillas" / "taller"
+TALLER_TIMEOUT = int(os.environ.get("TALLER_TIMEOUT_SEG", "5400"))  # 90 min
+HERRAMIENTAS_TALLER = ",".join([
+    "Read", "Write", "Edit", "Glob", "Grep", "WebSearch", "WebFetch", "Agent", "Task", "TodoWrite",
+    "Bash(python *)", "Bash(python3 *)", "Bash(py *)", "Bash(uv *)", "Bash(pip *)", "Bash(pytest *)",
+    "Bash(uvicorn *)", "Bash(playwright *)", "Bash(npx tailwindcss *)", "Bash(git init *)", "Bash(git add *)",
+    "Bash(git commit *)", "Bash(git status *)", "Bash(git diff *)", "Bash(git log *)", "Bash(ls *)", "Bash(dir *)",
+])
+_candados: dict[str, threading.Lock] = {}
+
+
+def producto_de(orden: str, contexto: dict | None) -> str:
+    m = re.search(r"producto[:\s]+([a-z0-9][a-z0-9-]{2,40})", orden, re.I)
+    if m:
+        return m.group(1).lower()
+    return os.environ.get("TALLER_PRODUCTO") or ("geo-panel" if (contexto or {}).get("slug") in (None, "auditoria-geo", "taller-geo") else f"{contexto['slug']}-panel")
+
+
+def preparar_producto(nombre: str) -> Path:
+    """Crea (si no existe) la carpeta del producto con las reglas y el equipo del Taller, y le pone el último plano."""
+    carpeta = PRODUCTOS / nombre
+    nueva = not carpeta.exists()
+    carpeta.mkdir(parents=True, exist_ok=True)
+    for origen in PLANTILLA_TALLER.rglob("*"):
+        destino = carpeta / origen.relative_to(PLANTILLA_TALLER)
+        if origen.is_dir():
+            destino.mkdir(parents=True, exist_ok=True)
+        elif not destino.exists() or destino.parent.name == "agents":  # el equipo se actualiza siempre
+            destino.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(origen, destino)
+    planos = sorted((RAIZ / "blueprints").glob("*/blueprint.md"), key=lambda p: p.stat().st_mtime)
+    plano = carpeta / "docs" / "blueprint.md"
+    if planos and (not plano.exists() or planos[-1].stat().st_mtime > plano.stat().st_mtime):
+        plano.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(planos[-1], plano)
+    if nueva or not (carpeta / ".git").exists():
+        subprocess.run(["git", "init", "-q"], cwd=carpeta, check=False)
+    return carpeta
+
+
+def instrucciones_taller(slug_agente: str, orden: str, contexto: dict | None) -> str:
+    rol = ("Eres el **Jefe de obra** del Taller de JARVIS." if slug_agente == "jefe-obra"
+           else f"Trabaja como el subagente `{slug_agente}` (usa la herramienta Agent con subagent_type \"{slug_agente}\").")
+    ctx = f"\nProyecto de negocio: «{contexto.get('proyecto')}»." if contexto else ""
+    return f"""{rol}
+Lee `CLAUDE.md` y `docs/blueprint.md`. Mira `docs/avance.md` (créalo si no existe) para saber qué pasos ya están hechos.{ctx}
+
+MODO SIN INTERACCIÓN: nadie puede responderte. No hagas preguntas; si algo falta, toma el supuesto más razonable,
+anótalo en `docs/avance.md` y sigue. Si el plano está marcado como BORRADOR sin aprobación de Manuel, solo prepara
+(estructura, entorno, pruebas vacías) y no construyas funciones de negocio.
+
+Orden de Manuel (vía JARVIS):
+{orden}
+
+Cómo trabajar:
+- Reparte cada paso al subagente que corresponde con la herramienta Agent (`backend`, `frontend`, `pruebas`, `revisor`,
+  `verificador`), uno a la vez, y revisa su entrega. Tú no escribes el código grande: coordinas y verificas.
+- Un paso solo está hecho si su comando de verificación sale con código 0. Anótalo en `docs/avance.md` y haz un commit local.
+- Al cerrar una fase, pide al `revisor` una revisión y, si hay automatizaciones, al `verificador`.
+- No hagas push ni despliegues. No toques nada fuera de esta carpeta.
+Al terminar responde con: pasos hechos, pasos pendientes, problemas, y una última línea `Resumen: …` (máx. 140 caracteres)."""
+
+
+def flujo_taller(slug_agente: str, run: dict, contexto: dict | None) -> None:
+    orden = (run.get("input") or "").strip()
+    nombre = producto_de(orden, contexto)
+    candado = _candados.setdefault(nombre, threading.Lock())
+    if not candado.acquire(blocking=False):
+        reportar_run(run["id"], status="running", step=f"Esperando: otro trabajo usa {nombre}")
+        candado.acquire()
+    try:
+        carpeta = preparar_producto(nombre)
+        log(f"Taller ({slug_agente}): «{orden[:80]}» en {carpeta}")
+        reportar_run(run["id"], status="running", step=f"Leyendo el plano de {nombre}")
+        args = comando_claude() + [
+            "-p", "Sigue exactamente las instrucciones recibidas por la entrada estandar.",
+            "--permission-mode", "acceptEdits", "--allowedTools", HERRAMIENTAS_TALLER,
+            "--output-format", "stream-json", "--verbose",
+        ]
+        p = subprocess.Popen(args, cwd=carpeta, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                             text=True, encoding="utf-8", errors="replace")
+        assert p.stdin and p.stdout
+        p.stdin.write(instrucciones_taller(slug_agente, orden, contexto))
+        p.stdin.close()
+        vigilante = threading.Timer(TALLER_TIMEOUT, p.kill)
+        vigilante.daemon = True
+        vigilante.start()
+        hijos: dict[str, str] = {}  # tool_use_id → run_id de la orden hija
+        final, error, ultimo_paso = "", False, 0.0
+        for linea in p.stdout:
+            try:
+                ev = json.loads(linea)
+            except ValueError:
+                continue
+            tipo = ev.get("type")
+            if tipo == "assistant" and ev.get("parent_tool_use_id") is None:
+                for b in (ev.get("message") or {}).get("content") or []:
+                    if b.get("type") != "tool_use":
+                        continue
+                    entrada = b.get("input") or {}
+                    sub = str(entrada.get("subagent_type") or "")
+                    if b.get("name") in ("Agent", "Task") and sub in TALLER and sub != slug_agente:
+                        try:
+                            r = api("POST", "/api/agents/report", json={
+                                "agent": sub, "parent_run_id": run["id"], "status": "running",
+                                "input": str(entrada.get("description") or entrada.get("prompt") or "")[:300],
+                                "step": str(entrada.get("description") or "Trabajando")[:120]})
+                            hijos[b["id"]] = r.get("run_id")
+                        except Exception as e:  # noqa: BLE001
+                            log(f"  (no se pudo crear la orden de {sub}: {e})")
+                        reportar_run(run["id"], status="running", step=f"Entregó a {sub}: {str(entrada.get('description') or '')[:80]}")
+                    elif b.get("name") == "TodoWrite" and time.time() - ultimo_paso > 20:
+                        activos = [t.get("activeForm") or t.get("content") for t in entrada.get("todos") or [] if t.get("status") == "in_progress"]
+                        if activos:
+                            reportar_run(run["id"], status="running", step=str(activos[0])[:120])
+                            ultimo_paso = time.time()
+            elif tipo == "user":
+                for b in (ev.get("message") or {}).get("content") or []:
+                    if isinstance(b, dict) and b.get("type") == "tool_result" and b.get("tool_use_id") in hijos:
+                        contenido = b.get("content")
+                        texto = contenido if isinstance(contenido, str) else " ".join(
+                            c.get("text", "") for c in contenido or [] if isinstance(c, dict))
+                        hijo = hijos.pop(b["tool_use_id"])
+                        if hijo:
+                            reportar_run(hijo, status="error" if b.get("is_error") else "done",
+                                         summary=re.sub(r"\s+", " ", texto).strip()[:140] or "Entregado", output=texto[:20000])
+            elif tipo == "result":
+                final = str(ev.get("result") or "")
+                error = bool(ev.get("is_error"))
+        p.wait()
+        vigilante.cancel()
+        for hijo in hijos.values():  # subagentes que quedaron abiertos
+            if hijo:
+                reportar_run(hijo, status="error", summary="La sesión del Jefe de obra terminó antes")
+        if p.returncode != 0 or error:
+            if re.search(r"usage limit|rate limit|limit reached|5-hour", final, re.I):
+                raise Fallo("Se alcanzó el límite de uso de tu plan de Claude. Reintenta cuando se renueve.")
+            raise Fallo(f"Claude Code terminó con error: {final[-400:]}")
+        m = re.search(r"^\s*Resumen:\s*(.+)$", final, re.M)
+        historial = subprocess.run(["git", "log", "--oneline", "-10"], cwd=carpeta, capture_output=True, text=True).stdout
+        reportar_run(run["id"], status="done", summary=(m.group(1) if m else final[:140]).strip()[:140] or "Trabajo listo",
+                     output=f"{final[:50000]}\n\n## Últimos commits\n```\n{historial.strip() or '(sin commits)'}\n```\n\n_Producto en el PC: {carpeta}_")
+        log(f"Taller ({slug_agente}) listo")
+    finally:
+        candado.release()
+
+
+def procesar_taller(slug_agente: str, run: dict, contexto: dict | None) -> None:
+    try:
+        flujo_taller(slug_agente, run, contexto)
+    except Exception as e:  # noqa: BLE001
+        detalle = str(e) if isinstance(e, Fallo) else f"{type(e).__name__}: {e}"
+        log(f"ERROR Taller {slug_agente}: {detalle}\n{traceback.format_exc()}")
+        reportar_run(run["id"], status="error", summary=detalle[:300])
+
+
 def siguiente_orden_skill() -> bool:
-    """Busca una orden pendiente para Radar, Crítico o Arquitecto. True si procesó una."""
+    """Busca una orden pendiente para los agentes con skill o del Taller. True si procesó una."""
     for slug_agente in AGENTES_SKILL:
         r = api("GET", f"/api/agents/next?agent={slug_agente}")
         if r.get("run"):
             procesar_skill(slug_agente, r["run"], r.get("contexto"))
+            return True
+    for slug_agente in TALLER:
+        r = api("GET", f"/api/agents/next?agent={slug_agente}")
+        if r.get("run"):
+            procesar_taller(slug_agente, r["run"], r.get("contexto"))
             return True
     return False
 

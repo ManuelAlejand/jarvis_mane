@@ -4,7 +4,7 @@
  * Los emojis de la base de datos (`agents.emoji`) se siguen usando en Telegram; en la interfaz van estos iconos.
  */
 import {
-  Activity, Armchair, Bot, CircleCheck, CircleDashed, Clapperboard, Cloud, DraftingCompass, Scale, CloudFog, CloudLightning, CloudMoon, CloudRain,
+  Activity, Armchair, Bot, CircleCheck, CircleDashed, Clapperboard, Cloud, DraftingCompass, Scale, FlaskConical, Hammer, HardHat, LayoutDashboard, ScanSearch, Server, Workflow, CloudFog, CloudLightning, CloudMoon, CloudRain,
   CloudSun, Coffee, Cpu, Droplet, Film, Footprints, Gamepad2, Joystick, Loader, Mail, Microscope, Moon, Music, OctagonAlert,
   PenTool, Play, Radar, Rocket, Satellite, ShieldCheck, Sofa, Sun, Sunrise, Sunset, Telescope, TriangleAlert, type LucideIcon,
 } from "lucide-react";
@@ -24,6 +24,13 @@ const POR_AGENTE: Record<string, LucideIcon> = {
   radar: Radar,
   critico: Scale,
   arquitecto: DraftingCompass,
+  "jefe-obra": HardHat,
+  backend: Server,
+  frontend: LayoutDashboard,
+  pruebas: FlaskConical,
+  revisor: ScanSearch,
+  verificador: Workflow,
+  forjador: Hammer,
 };
 
 /** Si el agente es nuevo, se elige por palabras de su rol. */

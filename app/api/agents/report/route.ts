@@ -26,6 +26,8 @@ interface Report {
   cost_usd?: number;
   /** Resultado estructurado (p. ej. resultado.json del Radar) */
   result?: unknown;
+  /** Al crear una orden hija (p. ej. el Jefe de obra le entrega un paso al backend) */
+  parent_run_id?: string;
 }
 
 export async function POST(req: NextRequest) {
@@ -42,7 +44,10 @@ export async function POST(req: NextRequest) {
     if (!agent) return NextResponse.json({ ok: false, error: "Agente no existe" }, { status: 404 });
     const { data: run, error } = await db
       .from("agent_runs")
-      .insert({ agent_id: agent.id, input: r.input ?? "(iniciado por el motor local)", source: "local", status: "running", started_at: new Date().toISOString() })
+      .insert({
+        agent_id: agent.id, input: r.input ?? "(iniciado por el motor local)", source: "local", status: "running",
+        started_at: new Date().toISOString(), current_step: r.step ?? null, ...(r.parent_run_id ? { parent_run_id: r.parent_run_id } : {}),
+      })
       .select("id")
       .single();
     if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
