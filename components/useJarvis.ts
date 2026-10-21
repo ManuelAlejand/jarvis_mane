@@ -35,7 +35,7 @@ export function useJarvis(userId: string) {
       db.from("api_spend_month").select("spent_usd").maybeSingle(),
       db.from("settings").select("value").eq("key", "api_budget_usd").maybeSingle(),
       db.from("agents").select("id,slug,name,role,color,project_id,description,enabled,status,runtime,model,position,current_run_id,last_summary,last_run_at").order("position"),
-      db.from("agent_runs").select("id,agent_id,status,input,current_step,output,summary,verdict,cost_usd,source,error,created_at,started_at,finished_at,result").order("created_at", { ascending: false }).limit(60),
+      db.from("agent_runs").select("id,agent_id,status,input,current_step,output,summary,verdict,cost_usd,source,error,created_at,started_at,finished_at,result,parent_run_id,video_id").order("created_at", { ascending: false }).limit(60),
       db.from("videos").select("id,ref,titulo,estado,fase_detalle,modo,intentos,veredicto,duracion_seg,costo_estimado_usd,youtube_url,error,idea,created_at,updated_at").order("created_at", { ascending: false }).limit(40),
       db.from("settings").select("value").eq("key", "studio_heartbeat").maybeSingle(),
     ]);

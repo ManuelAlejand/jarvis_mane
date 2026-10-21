@@ -262,3 +262,60 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .login h1 { margin: 18px 0 6px; }
 .empty { padding: 24px 4px; color: var(--muted); }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+
+/* ───────────── Oficina ───────────── */
+.oficina { display: flex; flex-direction: column; gap: 10px; }
+.oficina-barra { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.oficina-barra h2 { margin: 0; font: 600 20px var(--display); letter-spacing: .04em; }
+.oficina-acciones { margin-left: auto; display: flex; gap: 6px; }
+.oficina-escena {
+  position: relative; height: calc(100dvh - 190px); min-height: 360px; overflow: hidden;
+  background: #050c14; border: 1px solid var(--line); clip-path: var(--chamfer);
+  box-shadow: inset 0 0 60px rgba(127, 227, 255, .08);
+}
+.oficina-escena > div:first-child { position: absolute; inset: 0; }
+.oficina-aviso { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); margin: 0; }
+.oficina-capa { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+.pared {
+  position: absolute; display: flex; flex-direction: column; gap: 1px; padding: 2px 6px;
+  background: rgba(5, 18, 30, .82); border: 1px solid rgba(127, 227, 255, .45); color: var(--text);
+  font-family: var(--display); line-height: 1.15; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  box-shadow: 0 0 12px rgba(127, 227, 255, .25);
+}
+.pared b { color: var(--arc); letter-spacing: .05em; overflow: hidden; text-overflow: ellipsis; }
+.pared.nucleo { border-color: var(--gold); box-shadow: 0 0 14px rgba(232, 176, 75, .35); }
+.pared.nucleo b { color: var(--gold); }
+.pared em { font-style: normal; }
+.pared .ok { color: var(--ok); } .pared .mal { color: var(--alert); }
+.pared .barra { display: inline-block; vertical-align: middle; width: 4em; height: .5em; background: rgba(127,227,255,.15); }
+.pared .barra i { display: block; height: 100%; background: var(--arc); }
+.agente-capa { position: absolute; transform: translate(-50%, -100%); display: flex; flex-direction: column; align-items: center; gap: 3px; }
+.agente-capa .nombre {
+  font: 600 1em var(--display); padding: 0 5px; background: rgba(5, 14, 24, .78); color: var(--text);
+  border: 1px solid rgba(127, 227, 255, .25); white-space: nowrap;
+}
+.agente-capa .nombre.activo { border-color: var(--arc); color: var(--arc); }
+.agente-capa .nombre.jarvis { color: var(--gold); border-color: var(--gold); text-shadow: 0 0 6px rgba(232,176,75,.6); }
+.agente-capa .nombre.sel { outline: 1px solid var(--gold); }
+.agente-capa .globo {
+  max-width: 18em; font: 1.05em/1.3 var(--body); padding: .3em .7em; color: var(--ink); background: var(--arc);
+  border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,.4); text-align: center;
+}
+.agente-capa .globo.ok { background: var(--ok); }
+.agente-capa .globo.error { background: var(--alert); color: #fff; }
+.oficina-panel {
+  position: fixed; right: 16px; top: 80px; width: min(360px, calc(100vw - 32px)); max-height: calc(100dvh - 120px);
+  overflow: auto; z-index: 30;
+}
+.oficina-panel h3 { margin: 0; font: 600 18px var(--display); }
+.oficina-historial { list-style: none; padding: 0; margin: 8px 0 0; display: grid; gap: 6px; }
+.oficina-historial li { display: flex; gap: 6px; align-items: baseline; }
+.estado-punto { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none; }
+.estado-punto.working { background: var(--arc); box-shadow: 0 0 6px var(--arc); }
+.estado-punto.error { background: var(--alert); }
+.estado-punto.idle { background: var(--ok); }
+.oficina-ayuda { margin: 0; }
+@media (orientation: landscape) and (max-height: 520px) {
+  .oficina-escena { height: calc(100dvh - 90px); }
+  .oficina-ayuda { display: none; }
+}

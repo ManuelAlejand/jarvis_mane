@@ -70,6 +70,8 @@ export interface AgentRun {
   started_at: string | null;
   finished_at: string | null;
   result: { ideas?: { titulo: string; gancho: string; angulo: string }[]; selected?: number[]; sent?: boolean; nicho?: string } | null;
+  parent_run_id?: string | null;
+  video_id?: string | null;
 }
 
 export interface VideoRow {
