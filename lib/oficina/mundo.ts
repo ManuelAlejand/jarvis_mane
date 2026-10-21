@@ -3,7 +3,7 @@
  * La vista traduce lo que pasa en Supabase a órdenes: sentarse a trabajar, levantarse,
  * entregar trabajo a otro agente, celebrar o negar.
  */
-import { camino, celdaLibre, type Celda, type Plano, type Puesto, type Sala } from "@/lib/oficina/plano";
+import { camino, celdaLibre, type Celda, type Plano, type Puesto, type Sala } from "./plano";
 
 export type Anim = "Idle" | "Walking" | "Sitting" | "ThumbsUp" | "No" | "Wave" | "Yes";
 
@@ -86,7 +86,7 @@ export class Mundo {
       a.rot = Math.atan2(centro(b.puesto.silla).x - a.x, centro(b.puesto.silla).z - a.z);
       this.gesto(de, "Wave", 2200);
       this.gesto(para, "Yes", 1800);
-      window.setTimeout(() => {
+      setTimeout(() => {
         a.ocupadoHasta = 0;
         if (a.trabajando) this.ir(a, a.puesto.silla, () => (a.sentado = true));
         else this.ir(a, a.puesto.entrega);
