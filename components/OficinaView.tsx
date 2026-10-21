@@ -13,7 +13,7 @@ import { Escena, type InfoRobot, type InfoSala } from "@/components/oficina3d/Es
 const ESTUDIO = new Set(["explorador", "investigador", "guionista", "productor", "validador", "publicador"]);
 const NOTA_MS = 25000; // tiempo que se ve "listo" o "error" sobre la cabeza
 
-type Nota = { tipo: "ok" | "error"; texto: string; hasta: number };
+type Nota = { tipo: "ok" | "error" | "frase"; texto: string; hasta: number };
 
 function hash(s: string) {
   let h = 0;
@@ -64,7 +64,11 @@ export function OficinaView({ s }: { s: JarvisState }) {
   const plano = useMemo(() => generarPlano(specs), [firma]);
   const mundo = useMemo(() => new Mundo(plano), [plano]);
 
-  const activos = useMemo(() => s.agents.filter((a) => a.enabled).sort((a, b) => a.position - b.position), [s.agents]);
+  // Los líderes van primero: se sientan en el primer escritorio de su sala
+  const activos = useMemo(
+    () => s.agents.filter((a) => a.enabled).sort((a, b) => Number(!!b.is_leader) - Number(!!a.is_leader) || a.position - b.position),
+    [s.agents],
+  );
   const porId = useMemo(() => new Map(s.agents.map((a) => [a.id, a])), [s.agents]);
   const ultimoRun = useMemo(() => {
     const m = new Map<string, AgentRun>();
@@ -81,10 +85,17 @@ export function OficinaView({ s }: { s: JarvisState }) {
       const n = usados.get(sala.slug) ?? 0;
       if (n >= sala.puestos.length) continue; // sala llena
       usados.set(sala.slug, n + 1);
-      out.set(a.slug, { sala, puesto: sala.puestos[n], lider: n === 0 });
+      out.set(a.slug, { sala, puesto: sala.puestos[n], lider: !!a.is_leader || (n === 0 && sala.tipo === "proyecto" && !activos.some((x) => x.is_leader && salaDeAgente(x, s.projects, plano.salas).slug === sala.slug)) });
     }
     return out;
   }, [activos, s.projects, plano]);
+
+  /** Líder de cada sala (slug del agente) */
+  const liderSala = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const [slug, as] of asignacion) if (as.lider) m.set(as.sala.slug, slug);
+    return m;
+  }, [asignacion]);
 
   const trabajando = useCallback((a: AgentRow) => a.status === "working" || enCurso(ultimoRun.get(a.id)), [ultimoRun]);
 
@@ -99,41 +110,92 @@ export function OficinaView({ s }: { s: JarvisState }) {
     }
   }, [mundo, activos, asignacion, trabajando]);
 
-  // Entregas y gestos: solo para ejecuciones nuevas o que cambiaron (no en la primera carga)
+  // Entregas y gestos: solo para ejecuciones nuevas o que cambiaron (no en la primera carga).
+  // Cadena: tu pedido → JARVIS → líder de la sala → trabajador. Al terminar, el trabajador reporta a su líder
+  // (que firma el aviso de Telegram) o le entrega el trabajo al siguiente agente del flujo.
   useEffect(() => {
     const vistos = runsVistos.current;
     const ahora = Date.now();
+    const nota = (slug: string, tipo: Nota["tipo"], texto: string, ms = NOTA_MS) => notas.current.set(slug, { tipo, texto, hasta: Date.now() + ms });
+    const nombre = (slug: string) => s.agents.find((a) => a.slug === slug)?.name ?? slug;
     if (vistos) {
+      const entregaron = new Set<string>();
+      const terminados: { slug: string; r: AgentRun }[] = [];
       for (const r of [...s.runs].reverse()) {
         const antes = vistos.get(r.id);
         const agente = porId.get(r.agent_id);
         if (!agente) continue;
         if (antes === undefined && enCurso(r)) {
-          // ¿Quién le entrega el trabajo? El agente de la ejecución padre o de la anterior del mismo video; si no, JARVIS
           const previa = r.parent_run_id
             ? s.runs.find((x) => x.id === r.parent_run_id)
             : r.video_id
               ? s.runs.find((x) => x.video_id === r.video_id && x.id !== r.id && x.created_at <= r.created_at)
               : undefined;
-          const quien = previa ? porId.get(previa.agent_id)?.slug : "jarvis";
-          if (quien && quien !== agente.slug) {
-            mundo.entregar(quien, agente.slug);
-            notas.current.set(quien, { tipo: "ok", texto: `Entregando a ${agente.name}…`, hasta: ahora + 9000 });
+          const deAgente = previa ? porId.get(previa.agent_id)?.slug : undefined;
+          const sala = asignacion.get(agente.slug)?.sala.slug;
+          const lider = sala ? liderSala.get(sala) : undefined;
+          if (deAgente && deAgente !== agente.slug) {
+            // Relevo dentro del equipo
+            entregaron.add(deAgente);
+            mundo.entregar(deAgente, agente.slug);
+            nota(deAgente, "ok", `Entregando a ${agente.name}…`, 9000);
+          } else if (agente.slug !== "jarvis") {
+            // Pedido nuevo: JARVIS se lo lleva al líder y el líder al trabajador
+            if (lider && lider !== agente.slug) {
+              nota("jarvis", "ok", `Encargo para ${nombre(lider)}…`, 12000);
+              mundo.entregar("jarvis", lider, () => {
+                nota(lider, "ok", `${agente.name}, esto es para ti`, 9000);
+                mundo.entregar(lider, agente.slug);
+              });
+            } else {
+              nota("jarvis", "ok", `Entregando a ${agente.name}…`, 9000);
+              mundo.entregar("jarvis", agente.slug);
+            }
           }
         }
         if (antes !== undefined && antes !== r.status) {
           if (r.status === "done") {
             mundo.gesto(agente.slug, "ThumbsUp", 2600);
-            notas.current.set(agente.slug, { tipo: "ok", texto: r.summary ?? "Trabajo terminado", hasta: ahora + NOTA_MS });
+            nota(agente.slug, "ok", r.summary ?? "Trabajo terminado");
+            terminados.push({ slug: agente.slug, r });
           } else if (r.status === "error") {
             mundo.gesto(agente.slug, "No", 2600);
-            notas.current.set(agente.slug, { tipo: "error", texto: r.error ?? "Se detuvo", hasta: ahora + NOTA_MS });
+            nota(agente.slug, "error", r.error ?? "Se detuvo");
+            terminados.push({ slug: agente.slug, r });
           }
         }
       }
+      // Quien terminó y no le pasó el trabajo a nadie, va a reportarle a su líder
+      for (const { slug, r } of terminados) {
+        if (entregaron.has(slug)) continue;
+        const sala = asignacion.get(slug)?.sala.slug;
+        const lider = sala ? liderSala.get(sala) : undefined;
+        if (!lider || lider === slug) continue;
+        window.setTimeout(() => {
+          nota(slug, r.status === "error" ? "error" : "ok", `Reportando a ${nombre(lider)}…`, 9000);
+          mundo.entregar(slug, lider, () => nota(lider, "ok", "📨 Avisando a Manuel por Telegram", 8000));
+        }, 2800);
+      }
     }
     runsVistos.current = new Map(s.runs.map((r) => [r.id, r.status]));
-  }, [s.runs, porId, mundo]);
+    void ahora;
+  }, [s.runs, s.agents, porId, mundo, asignacion, liderSala]);
+
+  // Frases de personalidad: de vez en cuando alguien libre comenta algo (refs: el intervalo no se reinicia con cada dato)
+  const paraFrases = useRef({ activos, trabajando });
+  paraFrases.current = { activos, trabajando };
+  useEffect(() => {
+    const t = window.setInterval(() => {
+      if (document.hidden) return;
+      const { activos: lista, trabajando: ocupado } = paraFrases.current;
+      const libres = lista.filter((a) => (a.frases?.length ?? 0) > 0 && !ocupado(a) && !((notas.current.get(a.slug)?.hasta ?? 0) > Date.now()));
+      if (!libres.length) return;
+      const a = libres[Math.floor(Math.random() * libres.length)];
+      const f = a.frases![Math.floor(Math.random() * a.frases!.length)];
+      notas.current.set(a.slug, { tipo: "frase", texto: f, hasta: Date.now() + 6000 });
+    }, 8000);
+    return () => window.clearInterval(t);
+  }, []);
 
   // Refresca globos y notas cada segundo
   useEffect(() => {
@@ -153,11 +215,14 @@ export function OficinaView({ s }: { s: JarvisState }) {
       const viva = nota && nota.hasta > Date.now() ? nota : undefined;
       const sel = seleccion === a.slug;
       const texto = viva?.texto ?? (trabajando(a) ? run?.current_step || "Trabajando…" : sel ? a.last_summary || "Libre" : null);
+      const esLider = !!asignacion.get(a.slug)?.lider;
       return {
         slug: a.slug,
         nombre: a.name,
+        emoji: a.emoji ?? null,
+        lider: esLider,
         esJarvis: a.slug === "jarvis",
-        armadura: asignacion.get(a.slug)?.lider ? 0 : a.position,
+        armadura: esLider ? 0 : 1 + (a.position % 5),
         globo: texto ? { texto: texto.length > 70 && !sel ? `${texto.slice(0, 67)}…` : texto, tipo: viva?.tipo ?? "trabajo" } : null,
         seleccionado: sel,
       };
@@ -200,6 +265,10 @@ export function OficinaView({ s }: { s: JarvisState }) {
   });
 
   const agenteSel = seleccion ? s.agents.find((a) => a.slug === seleccion) : undefined;
+  const salaSel = agenteSel ? asignacion.get(agenteSel.slug)?.sala : undefined;
+  const equipoSel = agenteSel && asignacion.get(agenteSel.slug)?.lider && salaSel
+    ? activos.filter((a) => a.slug !== agenteSel.slug && asignacion.get(a.slug)?.sala.slug === salaSel.slug)
+    : [];
 
   return (
     <section className="oficina">
@@ -228,7 +297,17 @@ export function OficinaView({ s }: { s: JarvisState }) {
         />
       </div>
 
-      {agenteSel && <PanelAgente a={agenteSel} runs={s.runs.filter((r) => r.agent_id === agenteSel.id)} onClose={() => setSeleccion(null)} />}
+      {agenteSel && (
+        <PanelAgente
+          a={agenteSel}
+          sala={salaSel?.nombre}
+          lider={!!asignacion.get(agenteSel.slug)?.lider}
+          equipo={equipoSel.map((x) => ({ slug: x.slug, nombre: x.name, emoji: x.emoji ?? "", trabajando: trabajando(x), paso: ultimoRun.get(x.id)?.current_step ?? null }))}
+          runs={s.runs.filter((r) => r.agent_id === agenteSel.id)}
+          onClose={() => setSeleccion(null)}
+          onElegir={setSeleccion}
+        />
+      )}
       <p className="muted small oficina-ayuda">
         Toca un robot para ver qué hace · arrastra para girar · clic derecho o dos dedos para moverte · rueda o pellizco para acercar.
       </p>
@@ -236,18 +315,48 @@ export function OficinaView({ s }: { s: JarvisState }) {
   );
 }
 
-function PanelAgente({ a, runs, onClose }: { a: AgentRow; runs: AgentRun[]; onClose: () => void }) {
+interface Miembro {
+  slug: string;
+  nombre: string;
+  emoji: string;
+  trabajando: boolean;
+  paso: string | null;
+}
+
+function PanelAgente({ a, sala, lider, equipo, runs, onClose, onElegir }: {
+  a: AgentRow; sala?: string; lider: boolean; equipo: Miembro[]; runs: AgentRun[]; onClose: () => void; onElegir: (slug: string) => void;
+}) {
   const actual = runs.find(enCurso);
   const costo = runs.reduce((t, r) => t + (Number(r.cost_usd) || 0), 0);
   return (
     <aside className="panel oficina-panel" aria-label={`Detalle de ${a.name}`}>
       <div className="panel-title">
-        <h3>{a.name}</h3>
+        <h3>{a.emoji ? `${a.emoji} ` : ""}{a.name}</h3>
         <button className="btn btn-ghost small" onClick={onClose} aria-label="Cerrar">✕</button>
       </div>
       <p className="muted small">
-        {a.role} · {a.runtime === "local" ? "motor local (tu PC)" : a.runtime === "api" ? "servidor" : "chat Claude"} · {a.model.replace("claude-", "")}
+        {lider && <span className="insignia-lider">Líder de sala</span>} {a.role}
+        {sala ? ` · ${sala}` : ""}
+        {!a.is_leader && <> · {a.runtime === "local" ? "motor local (tu PC)" : a.runtime === "api" ? "servidor" : "chat Claude"} · {a.model.replace("claude-", "")}</>}
       </p>
+      {a.personality && <p className="small personalidad">“{a.personality}”</p>}
+      {lider && equipo.length > 0 && (
+        <>
+          <p className="small" style={{ marginBottom: 4 }}><b>Su equipo</b></p>
+          <ul className="oficina-historial">
+            {equipo.map((m) => (
+              <li key={m.slug}>
+                <span className={`estado-punto ${m.trabajando ? "working" : "idle"}`} />
+                <button className="enlace small" onClick={() => onElegir(m.slug)}>{m.emoji} {m.nombre}</button>
+                <span className="muted small"> · {m.trabajando ? m.paso || "trabajando" : "libre"}</span>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+      {a.is_leader && (
+        <p className="muted small">Coordina a su equipo y firma los avisos de Telegram del proyecto. No gasta tokens.</p>
+      )}
       <p>
         <span className={`estado-punto ${actual ? "working" : a.status}`} /> {actual || a.status === "working" ? "Trabajando" : a.status === "error" ? "Con error" : "Libre"}
         {actual?.current_step && <> — <i>{actual.current_step}</i></>}

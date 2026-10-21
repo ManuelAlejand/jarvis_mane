@@ -52,6 +52,11 @@ export interface AgentRow {
   current_run_id: string | null;
   last_summary: string | null;
   last_run_at: string | null;
+  /** Líder de sala: no ejecuta trabajos, coordina y firma los avisos de su proyecto */
+  is_leader?: boolean;
+  personality?: string | null;
+  emoji?: string | null;
+  frases?: string[];
 }
 
 export interface AgentRun {

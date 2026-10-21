@@ -29,9 +29,11 @@ const ARMADURAS: [string, string][] = [
 export interface InfoRobot {
   slug: string;
   nombre: string;
+  emoji: string | null;
+  lider: boolean;
   esJarvis: boolean;
   armadura: number;
-  globo: { texto: string; tipo: "trabajo" | "ok" | "error" } | null;
+  globo: { texto: string; tipo: "trabajo" | "ok" | "error" | "frase" } | null;
   seleccionado: boolean;
 }
 
@@ -94,7 +96,8 @@ export function Escena(props: Props) {
               onClick={() => props.onSeleccionar(r.slug)}
               onKeyDown={(e) => e.key === "Enter" && props.onSeleccionar(r.slug)}
             >
-              {r.esJarvis ? "J.A.R.V.I.S." : r.nombre}
+              {r.esJarvis ? "J.A.R.V.I.S." : `${r.emoji ? `${r.emoji} ` : ""}${r.nombre}`}
+              {r.lider && <span className="corona" aria-label="líder">★</span>}
             </div>
           </div>
         </div>
@@ -463,6 +466,7 @@ function RobotAgente({ info, mundo, onSeleccionar }: { info: InfoRobot; mundo: M
           <meshBasicMaterial color="#7fe3ff" transparent opacity={0.6} />
         </mesh>
       )}
+      {info.lider && <InsigniaLider alto={ALTURA_ROBOT} />}
       {info.seleccionado && (
         <mesh rotation-x={-Math.PI / 2} position={[0, 0.03, 0]}>
           <ringGeometry args={[0.45, 0.55, 40]} />
@@ -470,6 +474,22 @@ function RobotAgente({ info, mundo, onSeleccionar }: { info: InfoRobot; mundo: M
         </mesh>
       )}
     </group>
+  );
+}
+
+/** Rombo dorado flotando sobre la cabeza de los líderes de sala */
+function InsigniaLider({ alto }: { alto: number }) {
+  const m = useRef<THREE.Mesh>(null);
+  useFrame(({ clock }) => {
+    if (!m.current) return;
+    m.current.rotation.y = clock.elapsedTime * 1.6;
+    m.current.position.y = alto + 0.12 + Math.sin(clock.elapsedTime * 2) * 0.04;
+  });
+  return (
+    <mesh ref={m} position={[0, alto + 0.12, 0]}>
+      <octahedronGeometry args={[0.09]} />
+      <meshStandardMaterial color="#ffd36b" emissive="#e8b04b" emissiveIntensity={2.2} metalness={0.6} roughness={0.2} />
+    </mesh>
   );
 }
 

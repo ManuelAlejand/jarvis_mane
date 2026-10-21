@@ -115,10 +115,10 @@ export function ideasMessage(r: Investigacion) {
   ].join("\n");
 }
 
-export async function sendIdeas(chatId: number, runId: string, r: Investigacion) {
+export async function sendIdeas(chatId: number, runId: string, r: Investigacion, encabezado = "") {
   return tg("sendMessage", {
     chat_id: chatId,
-    text: ideasMessage(r).slice(0, 4000),
+    text: (encabezado + ideasMessage(r)).slice(0, 4000),
     parse_mode: "HTML",
     reply_markup: ideasKeyboard(runId, r),
   });

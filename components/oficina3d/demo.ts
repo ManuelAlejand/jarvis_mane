@@ -16,14 +16,18 @@ export const DEMO_PASOS = 14;
 
 export function estadoDemo(paso: number): JarvisState {
   const k = paso % DEMO_PASOS;
+  const yt = { project_id: "p1" };
+  const f = (emoji: string, personality: string, frases: string[]) => ({ emoji, personality, frases });
   const agents = [
-    A("a0", "jarvis", "JARVIS", "Orquestador", 0, "chat"),
-    A("a1", "explorador", "Explorador", "Explorador de tendencias", 1, "api"),
-    A("a2", "investigador", "Investigador", "Investigador de nichos", 2, "api"),
-    A("a3", "guionista", "Guionista", "Guionista", 3),
-    A("a4", "productor", "Productor", "Productor", 4),
-    A("a5", "validador", "Validador", "Validador", 5),
-    A("a6", "publicador", "Publicador", "Publicador", 6),
+    A("a0", "jarvis", "JARVIS", "Orquestador", 0, "chat", f("🤖", "Mayordomo digital: formal, preciso y con humor seco británico.", ["A sus órdenes, señor.", "Sistemas en línea al 100 %."])),
+    A("a1", "explorador", "Explorador", "Explorador de tendencias", 1, "api", { ...yt, ...f("📈", "Curioso e inquieto.", ["Las tendencias no duermen."]) }),
+    A("a2", "investigador", "Investigador", "Investigador de nichos", 2, "api", { ...yt, ...f("🔎", "Meticuloso.", ["Necesito una fuente más."]) }),
+    A("a3", "guionista", "Guionista", "Guionista", 3, "local", { ...yt, ...f("✍️", "Dramático y creativo.", ["Pero aquí está lo extraño…"]) }),
+    A("a4", "productor", "Productor", "Productor", 4, "local", { ...yt, ...f("🎞️", "Práctico y paciente.", ["Renderizando… paciencia."]) }),
+    A("a5", "validador", "Validador", "Validador", 5, "local", { ...yt, ...f("🛡️", "Estricto.", ["Aprobado. Por ahora."]) }),
+    A("a6", "publicador", "Publicador", "Publicador", 6, "local", { ...yt, ...f("🚀", "Entusiasta.", ["El botón público es tuyo, Manuel."]) }),
+    A("a7", "friday", "F.R.I.D.A.Y.", "Líder del estudio de YouTube", 10, "chat", { ...yt, is_leader: true, ...f("🎬", "Directora del estudio: directa, rápida y orientada a resultados.", ["Equipo, el algoritmo no espera."]) }),
+    A("a8", "edith", "E.D.I.T.H.", "Líder de la Auditoría GEO", 11, "chat", { project_id: "p2", is_leader: true, ...f("📍", "Analítica y estratégica.", ["Primero medir, luego vender."]) }),
   ];
   const ahora = Date.now();
   const runs: Record<string, unknown>[] = [];

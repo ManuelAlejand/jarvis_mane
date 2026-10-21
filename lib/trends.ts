@@ -3,6 +3,7 @@ import { adminClient, log } from "@/lib/supabase/admin";
 import { BudgetExceeded, callClaude, RateLimited } from "@/lib/ai";
 import { INVESTIGADOR_SCHEMA, renderInvestigacion, sendIdeas, type Investigacion } from "@/lib/studio";
 import { sendMessage } from "@/lib/telegram";
+import { firma, liderDe } from "@/lib/lideres";
 
 /**
  * Explorador de tendencias: lee lo que está funcionando HOY en YouTube (API pública, solo llave)
@@ -167,7 +168,8 @@ export async function runExplorador(opts: { chatIds?: number[]; source?: string 
       await db.from("agent_runs").update({
         status: "done", output: renderInvestigacion(r), summary, result: r, cost_usd: cost, finished_at: now(), current_step: null,
       }).eq("id", run.id);
-      for (const c of chats) await sendIdeas(c, run.id, { ...r, nicho: `📈 Tendencias de hoy · ${r.nicho}` });
+      const encabezado = firma(await liderDe({ agentSlug: "explorador" }));
+      for (const c of chats) await sendIdeas(c, run.id, { ...r, nicho: `📈 Tendencias de hoy · ${r.nicho}` }, encabezado);
     }
     await db.from("agents").update({ status: "idle", current_run_id: null, last_summary: summary, last_run_at: now() }).eq("id", agent.id);
     await log("agent", `Explorador: ${summary}`, "info", { cost });

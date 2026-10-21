@@ -76,11 +76,14 @@ export class Mundo {
     if (r) r.gesto = { anim, hasta: performance.now() + ms };
   }
 
-  /** `de` camina hasta el puesto de `para`, saluda y vuelve a lo suyo. */
-  entregar(de: string, para: string) {
+  /** `de` camina hasta el puesto de `para`, saluda y vuelve a lo suyo. `luego` se llama tras el saludo. */
+  entregar(de: string, para: string, luego?: () => void) {
     const a = this.robots.get(de);
     const b = this.robots.get(para);
-    if (!a || !b || a === b) return;
+    if (!a || !b || a === b) {
+      luego?.();
+      return;
+    }
     a.ocupadoHasta = performance.now() + 30000;
     this.ir(a, b.puesto.entrega, () => {
       a.rot = Math.atan2(centro(b.puesto.silla).x - a.x, centro(b.puesto.silla).z - a.z);
@@ -88,6 +91,7 @@ export class Mundo {
       this.gesto(para, "Yes", 1800);
       setTimeout(() => {
         a.ocupadoHasta = 0;
+        luego?.();
         if (a.trabajando) this.ir(a, a.puesto.silla, () => (a.sentado = true));
         else this.ir(a, a.puesto.entrega);
       }, 2300);

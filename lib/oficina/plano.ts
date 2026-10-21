@@ -46,10 +46,12 @@ export interface Plano {
 }
 
 export const SALA_W = 12;
-export const SALA_H = 9;
+export const SALA_H = 12;
 const POR_FILA = 3;
 
+/** El primero es el del líder: al fondo de la sala, mirando hacia su equipo. */
 const ESCRITORIOS = [
+  { x: 5, y: 9 },
   { x: 1, y: 1 },
   { x: 5, y: 1 },
   { x: 9, y: 1 },

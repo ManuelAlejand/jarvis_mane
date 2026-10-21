@@ -21,7 +21,7 @@ async function abrir(viewport) {
   p.on("console", (m) => { if (m.type() === "error" && !/Failed to load resource|fonts\.googleapis/.test(m.text())) errores.push(m.text()); });
   await p.goto(`${BASE}/demo/oficina`);
   await p.waitForSelector(".oficina-escena canvas", { timeout: 30000 });
-  await p.waitForFunction(() => document.querySelectorAll(".oficina-capa .nombre").length >= 7, null, { timeout: 30000 });
+  await p.waitForFunction(() => document.querySelectorAll(".oficina-capa .nombre").length >= 9, null, { timeout: 30000 });
   await p.waitForTimeout(2500);
   return { p, errores };
 }
@@ -30,7 +30,8 @@ async function abrir(viewport) {
 {
   const { p, errores } = await abrir({ width: 1440, height: 900 });
   const nombres = await p.$$eval(".oficina-capa .nombre", (els) => els.map((e) => e.textContent));
-  ok("Carga la escena 3D con los 7 agentes", nombres.length === 7, nombres.join(", "));
+  ok("Carga la escena 3D con los 9 agentes (7 + 2 líderes)", nombres.length === 9, nombres.join(", "));
+  ok("Los líderes llevan su insignia", (await p.$$(".oficina-capa .corona")).length === 2);
   ok("Muestra las pantallas de pared de las 3 salas", (await p.$$(".oficina-capa .pared")).length === 3);
 
   const fps = await p.evaluate(() => new Promise((res) => { let n = 0; const t0 = performance.now(); const f = () => { n++; if (performance.now() - t0 < 2000) requestAnimationFrame(f); else res(n / 2); }; requestAnimationFrame(f); }));
@@ -57,17 +58,27 @@ async function abrir(viewport) {
 
   await p.locator(".oficina-capa .nombre", { hasText: "Validador" }).click();
   await p.waitForSelector(".oficina-panel h3", { timeout: 5000 });
-  ok("Al tocar un agente se abre su panel", (await p.textContent(".oficina-panel h3")) === "Validador");
+  ok("Al tocar un agente se abre su panel", (await p.textContent(".oficina-panel h3")).includes("Validador"));
+  await p.click(".oficina-panel button[aria-label='Cerrar']");
+  await p.click("text=Ver todo");
+  await p.waitForTimeout(800);
+  await p.locator(".oficina-capa .nombre", { hasText: "F.R.I.D.A.Y." }).click();
+  await p.waitForTimeout(600);
+  const panelLider = await p.textContent(".oficina-panel");
+  ok("El panel del líder muestra su equipo y personalidad", panelLider.includes("Su equipo") && panelLider.includes("Líder de sala") && panelLider.includes("Directora"));
   await p.click("text=Ver todo");
   await p.waitForTimeout(500);
   ok("«Ver todo» cierra el panel y reencuadra", (await p.$(".oficina-panel")) === null);
 
   // Flujo en vivo: entrega de JARVIS → trabajo → listo / error
   const vistos = new Set();
-  for (let i = 0; i < 70 && vistos.size < 3; i++) {
+  for (let i = 0; i < 120 && vistos.size < 6; i++) {
     const textos = await p.$$eval(".oficina-capa .globo", (els) => els.map((e) => e.className + "|" + e.textContent));
     for (const t of textos) {
       if (t.includes("Entregando a")) vistos.add("entrega");
+      if (t.includes("Encargo para")) vistos.add("encargo");
+      if (t.includes("Reportando a")) vistos.add("reporte");
+      if (t.startsWith("globo frase")) vistos.add("frase");
       if (t.startsWith("globo ok") && !t.includes("Entregando")) vistos.add("listo");
       if (t.startsWith("globo error")) vistos.add("error");
     }
@@ -76,6 +87,9 @@ async function abrir(viewport) {
   ok("Se ve la entrega de trabajo entre agentes", vistos.has("entrega"));
   ok("Se ve el aviso de trabajo terminado", vistos.has("listo"));
   ok("Se ve el aviso de error", vistos.has("error"));
+  ok("JARVIS lleva el encargo al líder de la sala", vistos.has("encargo"));
+  ok("El trabajador reporta a su líder al terminar", vistos.has("reporte"));
+  ok("Los agentes libres dicen frases de su personalidad", vistos.has("frase"));
   ok("Sin errores de JavaScript en PC", errores.length === 0, errores.slice(0, 3).join(" | "));
   await p.screenshot({ path: process.env.CAPTURA_PC ?? "/tmp/oficina-pc.png" });
   await p.close();

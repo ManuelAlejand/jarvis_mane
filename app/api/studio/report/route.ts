@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { adminClient, log } from "@/lib/supabase/admin";
 import { sendMessage } from "@/lib/telegram";
+import { firma, liderDe } from "@/lib/lideres";
 import { syncAgentRun } from "@/lib/studio";
 
 export const dynamic = "force-dynamic";
@@ -52,7 +53,10 @@ export async function POST(req: NextRequest) {
   if (r.estado || r.error) {
     await log("studio", `V${video.ref}: ${r.error ? `error — ${String(r.error).slice(0, 120)}` : r.estado}`, r.error ? "error" : "info");
   }
-  if (typeof r.notificar === "string" && video.chat_id) await sendMessage(video.chat_id, r.notificar);
+  if (typeof r.notificar === "string" && video.chat_id) {
+    const lider = await liderDe({ agentSlug: typeof r.agente === "string" ? r.agente : undefined, projectSlug: "youtube-shorts" });
+    await sendMessage(video.chat_id, firma(lider) + r.notificar);
+  }
 
   return NextResponse.json({ ok: true });
 }

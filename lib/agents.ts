@@ -3,6 +3,7 @@ import { after } from "next/server";
 import { adminClient, log } from "@/lib/supabase/admin";
 import { BudgetExceeded, callClaude, RateLimited } from "@/lib/ai";
 import { sendMessage } from "@/lib/telegram";
+import { firma, liderDe } from "@/lib/lideres";
 import { INVESTIGADOR_PROMPT, INVESTIGADOR_SCHEMA, renderInvestigacion, sendIdeas, type Investigacion } from "@/lib/studio";
 
 /**
@@ -25,14 +26,16 @@ export interface Agent {
   keywords: string[];
   project_id: string | null;
   position: number;
+  is_leader?: boolean;
 }
 
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 const norm = (s: string) => s.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
 
+/** Agentes que pueden recibir trabajos (los líderes de sala de la Oficina solo coordinan y firman avisos). */
 export async function listAgents(): Promise<Agent[]> {
   const { data } = await adminClient().from("agents").select("*").order("position");
-  return (data ?? []) as Agent[];
+  return ((data ?? []) as Agent[]).filter((a) => !a.is_leader);
 }
 
 /** Atajo sin IA: "busca ideas de…" coincide con las palabras clave de un agente activo. */
@@ -194,12 +197,13 @@ export async function executeRun(runId: string): Promise<"done" | "paused" | "er
     await setAgent(agent.id, { last_summary: summary, last_run_at: now });
     await log("agent", `${agent.name} terminó: ${summary}`, "info", { agent: agent.slug, run: runId, cost });
 
+    const encabezado = claimed.source_chat ? firma(await liderDe({ projectId: agent.project_id })) : "";
     if (claimed.source_chat && result) {
-      await sendIdeas(claimed.source_chat, runId, result);
+      await sendIdeas(claimed.source_chat, runId, result, encabezado);
     } else if (claimed.source_chat) {
       await sendMessage(
         claimed.source_chat,
-        `✅ <b>${esc(agent.name)}</b> terminó\n\n${esc(output).slice(0, 3500)}${output.length > 3500 ? "\n\n…(completo en el dashboard)" : ""}`,
+        `${encabezado}✅ <b>${esc(agent.name)}</b> terminó\n\n${esc(output).slice(0, 3500)}${output.length > 3500 ? "\n\n…(completo en el dashboard)" : ""}`,
       );
     }
     return "done";
@@ -221,7 +225,10 @@ export async function executeRun(runId: string): Promise<"done" | "paused" | "er
     await db.from("agent_runs").update({ status: "error", error: msg, finished_at: new Date().toISOString(), current_step: null }).eq("id", runId);
     await setAgent(agent.id, { status: "error" });
     await log("agent", `${agent.name} falló: ${msg}`, "error", { run: runId });
-    if (claimed.source_chat) await sendMessage(claimed.source_chat, `⚠️ <b>${esc(agent.name)}</b> no pudo terminar: ${esc(msg)}`);
+    if (claimed.source_chat) {
+      const encabezado = firma(await liderDe({ projectId: agent.project_id }));
+      await sendMessage(claimed.source_chat, `${encabezado}⚠️ <b>${esc(agent.name)}</b> no pudo terminar: ${esc(msg)}`);
+    }
     return "error";
   } finally {
     // Si no quedan runs activos, el agente vuelve a "en espera" (salvo error)

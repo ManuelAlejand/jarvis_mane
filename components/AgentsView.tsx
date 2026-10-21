@@ -47,7 +47,7 @@ export function AgentsView({ s }: { s: JarvisState }) {
 
   const states = s.agents.map((a) => agentState(a, s.runs).state);
   const working = states.filter((x) => x === "working").length;
-  const crew = s.agents.filter((a) => a.slug !== "jarvis");
+  const crew = s.agents.filter((a) => a.slug !== "jarvis" && !a.is_leader); // los líderes viven en la Oficina
   const jarvis = s.agents.find((a) => a.slug === "jarvis");
 
   return (

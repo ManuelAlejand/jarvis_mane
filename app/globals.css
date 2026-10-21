@@ -318,3 +318,10 @@ button, input, select, textarea { font: inherit; color: inherit; }
   .oficina-escena { height: calc(100dvh - 90px); }
   .oficina-ayuda { display: none; }
 }
+
+.agente-capa .globo.frase { background: #e9f3fb; color: var(--ink); font-style: italic; }
+.agente-capa .corona { color: var(--gold); margin-left: 4px; }
+.insignia-lider { display: inline-block; padding: 0 6px; border: 1px solid var(--gold); color: var(--gold); font-size: 11px; letter-spacing: .04em; }
+.personalidad { color: var(--text); opacity: .85; font-style: italic; }
+.enlace { background: none; border: 0; padding: 0; color: var(--arc); cursor: pointer; font: inherit; text-align: left; }
+.enlace:hover { text-decoration: underline; }

@@ -17,7 +17,7 @@ test("el plano reparte las salas en filas de 3 con su tamaño", () => {
   assert.equal(p.cols, 3 * (SALA_W + 1) + 1);
   assert.equal(p.rows, 2 * (SALA_H + 1) + 1);
   assert.equal(p.salas[0].puestos.length, 1, "el Núcleo tiene un puesto (JARVIS)");
-  assert.equal(p.salas[1].puestos.length, 6, "cada proyecto tiene 6 puestos");
+  assert.equal(p.salas[1].puestos.length, 7, "cada proyecto tiene 7 puestos (líder + 6)");
   assert.ok(p.salas[0].holo, "el Núcleo tiene mesa holográfica");
 });
 
