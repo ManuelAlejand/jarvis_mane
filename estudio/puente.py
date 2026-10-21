@@ -754,32 +754,64 @@ def probar() -> None:
     print("\nTodo listo." if ok else "\nCorrige lo marcado con ✘ y vuelve a probar.")
 
 
+AGENTES_PARALELO = max(1, int(os.environ.get("AGENTES_PARALELO", "2")))
+
+
+def latido_pc(host: str, alto: threading.Event) -> None:
+    """Avisa a JARVIS cada minuto que el PC está en línea, aunque esté ocupado produciendo un video."""
+    while not alto.wait(60):
+        try:
+            api("GET", f"/api/studio/next?host={host}&probar=1")
+        except Exception:  # noqa: BLE001 — sin red: el siguiente latido lo intenta de nuevo
+            pass
+
+
+def trabajador_agentes(n: int, alto: threading.Event) -> None:
+    """Hilo aparte para Radar, Crítico y Arquitecto: trabajan al mismo tiempo que el estudio de video."""
+    while not alto.is_set():
+        try:
+            if siguiente_orden_skill():
+                continue
+        except requests.RequestException as e:
+            log(f"[agentes {n}] sin conexión con JARVIS ({e.__class__.__name__})")
+            alto.wait(INTERVALO * 2)
+        except Exception as e:  # noqa: BLE001
+            log(f"[agentes {n}] error inesperado: {e}")
+        alto.wait(INTERVALO)
+
+
 def main() -> None:
     if "--probar" in sys.argv:
         return probar()
     if not (JARVIS and SECRETO):
         sys.exit("Falta JARVIS_URL o WORKER_SECRET en .env. Ejecuta: python puente.py --probar")
     una = "--una-vez" in sys.argv
-    log(f"Puente del estudio conectado a {JARVIS}. Esperando trabajo… (Ctrl+C para salir)")
     host = socket.gethostname()
+    alto = threading.Event()
+    if not una:
+        threading.Thread(target=latido_pc, args=(host, alto), daemon=True).start()
+        for n in range(AGENTES_PARALELO):
+            threading.Thread(target=trabajador_agentes, args=(n + 1, alto), daemon=True).start()
+    log(f"Puente del estudio conectado a {JARVIS}. Estudio de video + {AGENTES_PARALELO} carril(es) para "
+        f"Radar, Crítico y Arquitecto. Esperando trabajo… (Ctrl+C para salir)")
     while True:
         try:
             t = api("GET", f"/api/studio/next?host={host}").get("trabajo")
             if t:
                 procesar(t)
                 continue  # puede haber más en cola
-            if siguiente_orden_skill():
-                continue
             if una:
+                if siguiente_orden_skill():
+                    continue
                 return
         except requests.RequestException as e:
             log(f"Sin conexión con JARVIS ({e.__class__.__name__}); reintento en {INTERVALO * 3} s")
             time.sleep(INTERVALO * 2)
         except KeyboardInterrupt:
+            alto.set()
             log("Puente detenido.")
             return
         time.sleep(INTERVALO)
-
 
 if __name__ == "__main__":
     main()
