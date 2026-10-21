@@ -7,7 +7,8 @@
  */
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
 import type { ModoVoz } from "@/lib/oficina/mundo";
-import { htmlSeguro, quitarActivacion } from "@/lib/oficina/texto";
+import { htmlSeguro, quitarActivacion, sinEmojis } from "@/lib/oficina/texto";
+import { ChevronDown, ChevronRight, Radio, X } from "lucide-react";
 import { callar, hablar, sonar, textoParaVoz, vozJarvisActiva } from "@/lib/oficina/sonido";
 
 export type Enviar = (texto: string) => Promise<{ ok: boolean; html: string }>;
@@ -100,14 +101,14 @@ export const ConsolaJarvis = forwardRef<ConsolaApi, Props>(function ConsolaJarvi
       sonar("clic");
       try {
         const r = await enviar(v);
-        agregar("jarvis", htmlSeguro(r.html));
+        agregar("jarvis", htmlSeguro(sinEmojis(r.html)));
         onRespuesta(textoParaVoz(r.html), r.ok);
         sonar(r.ok ? "respuesta" : "error");
         onModo("hablando");
         const dijo = hablar(r.html, () => onModo(escuchaContinua.current ? "escuchando" : "normal"));
         if (!dijo) window.setTimeout(() => onModo(escuchaContinua.current ? "escuchando" : "normal"), 2200);
       } catch {
-        agregar("jarvis", "⚠️ No pude contactar al servidor. Revisa tu conexión.");
+        agregar("jarvis", "No pude contactar al servidor. Revisa tu conexión.");
         onModo("normal");
       } finally {
         setOcupado(false);
@@ -217,7 +218,7 @@ export const ConsolaJarvis = forwardRef<ConsolaApi, Props>(function ConsolaJarvi
     <div className={`consola-jarvis ${escuchando ? "escuchando" : ""} ${ocupado ? "pensando" : ""}`} role="region" aria-label="Consola de JARVIS">
       {msgs.length > 0 && (
         <button type="button" className="consola-plegar" onClick={() => setVerMsgs((v) => !v)} aria-expanded={verMsgs}>
-          {verMsgs ? "Ocultar conversación ▾" : `Ver conversación (${msgs.length}) ▸`}
+          {verMsgs ? <>Ocultar conversación <ChevronDown size={12} aria-hidden="true" /></> : <>Ver conversación ({msgs.length}) <ChevronRight size={12} aria-hidden="true" /></>}
         </button>
       )}
       {msgs.length > 0 && verMsgs && (
@@ -266,7 +267,7 @@ export const ConsolaJarvis = forwardRef<ConsolaApi, Props>(function ConsolaJarvi
               aria-pressed={modoEscucha}
               title="Modo escucha: JARVIS atiende cuando dices «Jarvis, …». Apágalo cuando no lo uses."
             >
-              <span aria-hidden="true">◎</span>
+              <Radio size={17} strokeWidth={1.8} aria-hidden="true" />
               <span className="sr-only">Modo escucha</span>
             </button>
           </>
@@ -276,11 +277,11 @@ export const ConsolaJarvis = forwardRef<ConsolaApi, Props>(function ConsolaJarvi
         </button>
         {compacta && (
           <button type="button" className="btn btn-ghost small" onClick={() => setAbierta(false)} aria-label="Cerrar consola">
-            ✕
+            <X size={15} aria-hidden="true" />
           </button>
         )}
       </form>
-      {vozJarvisActiva() ? null : msgs.length === 0 && <p className="consola-aviso tenue">Activa «🗣 Voz» arriba para que JARVIS te responda hablando.</p>}
+      {vozJarvisActiva() ? null : msgs.length === 0 && <p className="consola-aviso tenue">Activa «Voz» arriba para que JARVIS te responda hablando.</p>}
     </div>
   );
 });

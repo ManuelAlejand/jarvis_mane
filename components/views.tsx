@@ -1,6 +1,7 @@
 "use client";
 import { useMemo, useRef, useState } from "react";
 import { Reactor } from "@/components/Reactor";
+import { sinEmojis } from "@/lib/oficina/texto";
 import { projectProgress, type JarvisState } from "@/components/useJarvis";
 import { browserClient } from "@/lib/supabase/browser";
 import { SCOPE_LABEL, STATUS_LABEL, type Task, type TaskStatus } from "@/lib/types";
@@ -362,9 +363,9 @@ export function ConsoleView() {
         body: JSON.stringify({ text: v }),
       });
       const json = await res.json();
-      setMsgs((m) => [...m, { who: "jarvis", html: res.ok ? json.text : `⚠️ ${escapeHtml(json.error ?? "Error")}` }]);
+      setMsgs((m) => [...m, { who: "jarvis", html: res.ok ? sinEmojis(json.text) : escapeHtml(json.error ?? "Error") }]);
     } catch {
-      setMsgs((m) => [...m, { who: "jarvis", html: "⚠️ No pude contactar al servidor. Revisa tu conexión." }]);
+      setMsgs((m) => [...m, { who: "jarvis", html: "No pude contactar al servidor. Revisa tu conexión." }]);
     } finally {
       setBusy(false);
     }

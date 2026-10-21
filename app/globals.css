@@ -474,3 +474,29 @@ kbd {
 }
 .consola-plegar { justify-self: end; background: none; border: 0; color: var(--muted); font: 11px var(--display); letter-spacing: .06em; cursor: pointer; padding: 0 4px; }
 .consola-plegar:hover { color: var(--arc); }
+
+/* Iconos (Lucide) */
+.ico { display: inline-block; vertical-align: -2px; flex: none; }
+.ico.girando { animation: girar 1.4s linear infinite; }
+.agente-capa .nombre { display: inline-flex; align-items: center; gap: 4px; }
+.agente-capa .nombre .ico { color: var(--arc); opacity: .9; }
+.agente-capa .nombre.jarvis .ico { color: var(--gold); }
+.agente-capa .actividad { display: inline-grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; background: rgba(127,227,255,.14); color: var(--arc); }
+.agente-capa .corona { display: inline-grid; place-items: center; color: var(--gold); filter: drop-shadow(0 0 3px rgba(232,176,75,.7)); }
+.agente-capa .globo { display: inline-flex; align-items: center; gap: 6px; }
+.agente-capa .globo .ico { opacity: .85; }
+.hud-registro li .enlace, .hud-registro li > span { display: inline-flex; gap: 6px; align-items: baseline; }
+.hud-registro li .ico { color: var(--arc); transform: translateY(2px); }
+.hud-registro li.ok .ico { color: var(--ok); }
+.hud-registro li.error .ico { color: var(--alert); }
+.hud-registro li.alerta, .hud-registro li.alerta .ico { color: var(--gold); }
+.hud-titulo .ico { margin-left: -2px; }
+.hud-ambiente, .hud-tour { display: inline-flex; align-items: center; gap: 6px; }
+.hud-ambiente .ico { color: var(--gold); }
+.oficina-acciones .btn { display: inline-flex; align-items: center; gap: 6px; }
+.oficina-panel h3 { display: flex; align-items: center; gap: 8px; }
+.oficina-panel h3 .ico { color: var(--arc); filter: drop-shadow(0 0 4px rgba(127,227,255,.6)); }
+.oficina-historial .enlace { display: inline-flex; gap: 5px; align-items: center; }
+.pared .ico { vertical-align: -1px; }
+.consola-plegar { display: inline-flex; align-items: center; gap: 3px; }
+.oficina-respaldo .enlace { display: inline-flex; gap: 6px; align-items: center; }

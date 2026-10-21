@@ -12,7 +12,9 @@ import * as THREE from "three";
 import { clone as clonarEsqueleto } from "three/examples/jsm/utils/SkeletonUtils.js";
 import type { OrbitControls as OrbitImpl } from "three-stdlib";
 import type { Anim, Mundo } from "@/lib/oficina/mundo";
-import type { Plano, Puesto, Sala } from "@/lib/oficina/plano";
+import type { Plano, Puesto, Sala, TipoDescanso } from "@/lib/oficina/plano";
+import { Crown } from "lucide-react";
+import { IconoAgente, IconoDescanso, IconoEvento } from "@/components/oficina3d/Iconos";
 import { Ciudad } from "@/components/oficina3d/Ciudad";
 import { Mobiliario } from "@/components/oficina3d/Mobiliario";
 import { AuraJarvis, Chispas, HacesDatos, OrbitaProyectos, type ProyectoHolo } from "@/components/oficina3d/Efectos";
@@ -34,12 +36,13 @@ const ARMADURAS: [string, string][] = [
 export interface InfoRobot {
   slug: string;
   nombre: string;
-  emoji: string | null;
+  rol: string | null;
   lider: boolean;
   esJarvis: boolean;
   trabajando: boolean;
   /** Qué hace cuando está libre (descansando, tomando café…) */
   actividad: string | null;
+  tipoActividad: TipoDescanso | "yendo" | null;
   armadura: number;
   globo: { texto: string; tipo: "trabajo" | "ok" | "error" | "frase" } | null;
   seleccionado: boolean;
@@ -119,7 +122,12 @@ export function Escena(props: Props) {
       {props.robots.map((r) => (
         <div key={r.slug} ref={registrar(`robot:${r.slug}`)} className="ancla">
           <div className="agente-capa">
-            {r.globo && <div className={`globo ${r.globo.tipo}`}>{r.globo.texto}</div>}
+            {r.globo && (
+              <div className={`globo ${r.globo.tipo}`}>
+                {r.globo.tipo !== "frase" && <IconoEvento tipo={r.globo.tipo === "error" ? "alerta" : r.globo.tipo} tam={13} />}
+                {r.globo.texto}
+              </div>
+            )}
             <div
               className={`nombre ${r.esJarvis ? "jarvis" : ""} ${r.seleccionado ? "sel" : ""} ${r.globo?.tipo === "trabajo" ? "activo" : ""}`}
               role="button"
@@ -127,9 +135,18 @@ export function Escena(props: Props) {
               onClick={() => props.onSeleccionar(r.slug)}
               onKeyDown={(e) => e.key === "Enter" && props.onSeleccionar(r.slug)}
             >
-              {r.esJarvis ? "J.A.R.V.I.S." : `${r.emoji ? `${r.emoji} ` : ""}${r.nombre}`}
-              {r.actividad && <span className="actividad" title={r.actividad}>{r.actividad.split(" ").pop()}</span>}
-              {r.lider && <span className="corona" aria-label="líder">★</span>}
+              <IconoAgente slug={r.slug} rol={r.rol} tam={13} />
+              {r.esJarvis ? "J.A.R.V.I.S." : r.nombre}
+              {r.tipoActividad && (
+                <span className="actividad" title={r.actividad ?? undefined}>
+                  <IconoDescanso tipo={r.tipoActividad} tam={12} />
+                </span>
+              )}
+              {r.lider && (
+                <span className="corona" aria-label="líder">
+                  <Crown size={12} strokeWidth={2.2} aria-hidden="true" />
+                </span>
+              )}
             </div>
           </div>
         </div>

@@ -10,5 +10,5 @@ export const enviarComando: Enviar = async (texto) => {
     body: JSON.stringify({ text: texto }),
   });
   const json = (await res.json().catch(() => ({}))) as { text?: string; error?: string };
-  return res.ok ? { ok: true, html: json.text ?? "Listo." } : { ok: false, html: `⚠️ ${json.error ?? "Error"}` };
+  return res.ok ? { ok: true, html: json.text ?? "Listo." } : { ok: false, html: json.error ?? "Error" };
 };

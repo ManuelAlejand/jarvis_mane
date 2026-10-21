@@ -91,14 +91,6 @@ export function ambientePara(fecha: Date, clima: Clima, temperatura: number | nu
   return { hora: h, luz: luzDelDia(h), fase: faseDe(h), clima, temperatura, cielo: cieloPara(h, clima) };
 }
 
-export function iconoAmbiente(a: Pick<Ambiente, "fase" | "clima">): string {
-  if (a.clima === "tormenta") return "⛈️";
-  if (a.clima === "lluvia") return "🌧️";
-  if (a.clima === "niebla") return "🌫️";
-  if (a.clima === "nublado") return a.fase === "noche" ? "☁️" : "⛅";
-  return a.fase === "noche" ? "🌙" : a.fase === "dia" ? "☀️" : "🌅";
-}
-
 export const NOMBRE_CLIMA: Record<Clima, string> = {
   despejado: "despejado",
   nublado: "nublado",

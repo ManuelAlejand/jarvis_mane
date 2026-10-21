@@ -14,3 +14,11 @@ export function quitarActivacion(texto: string): string | null {
   const m = texto.trim().match(/^(?:oye\s+|hey\s+|ok\s+)?(?:j|y)arvi[sz]?[,.:!\s]+(.*)$/i);
   return m ? m[1].trim() : null;
 }
+
+/** Quita emojis (la interfaz usa iconos; los emojis quedan para Telegram). */
+export function sinEmojis(s: string) {
+  return s
+    .replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{2B00}-\u{2BFF}\u{FE0F}\u{200D}\u{20E3}]/gu, "")
+    .replace(/^\s+/, "")
+    .replace(/ {2,}/g, " ");
+}

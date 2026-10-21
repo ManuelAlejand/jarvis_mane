@@ -3,6 +3,7 @@ import { useState } from "react";
 import type { JarvisState } from "@/components/useJarvis";
 import { browserClient } from "@/lib/supabase/browser";
 import { VIDEO_ESTADO, type AgentRow, type AgentRun } from "@/lib/types";
+import { sinEmojis } from "@/lib/oficina/texto";
 
 const RUNTIME: Record<AgentRow["runtime"], string> = { api: "Servidor", chat: "Chat Claude", local: "Motor local" };
 const MODEL: Record<string, string> = { "claude-haiku-5-5": "Haiku", "claude-sonnet-5-5": "Sonnet", "claude-opus-5-5": "Opus" };
@@ -37,7 +38,7 @@ async function command(text: string) {
     body: JSON.stringify({ text }),
   });
   const json = await res.json();
-  return res.ok ? String(json.text).replace(/<[^>]+>/g, "") : `⚠️ ${json.error ?? "Error"}`;
+  return res.ok ? sinEmojis(String(json.text).replace(/<[^>]+>/g, "")) : String(json.error ?? "Error");
 }
 
 export function AgentsView({ s }: { s: JarvisState }) {
@@ -172,7 +173,7 @@ function IdeaPicker({ run, isAdmin }: { run: AgentRun; isAdmin: boolean }) {
       body: JSON.stringify({ run_id: run.id, selected: sel }),
     });
     const json = await res.json();
-    setMsg(res.ok ? json.text : `⚠️ ${json.error}`);
+    setMsg(res.ok ? sinEmojis(String(json.text)) : String(json.error));
     setBusy(false);
   };
 

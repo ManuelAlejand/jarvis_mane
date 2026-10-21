@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { ambientePara, climaDeCodigo, faseDe, horaEn, luzDelDia } from "../lib/oficina/ambiente";
-import { htmlSeguro, quitarActivacion } from "../lib/oficina/texto";
+import { htmlSeguro, quitarActivacion, sinEmojis } from "../lib/oficina/texto";
 import { estadisticasDe } from "../lib/oficina/estadisticas";
 import { generarPlano } from "../lib/oficina/plano";
 import { Mundo } from "../lib/oficina/mundo";
@@ -74,4 +74,10 @@ test("efectos del mundo: se registran y tienen tope", () => {
   for (let i = 0; i < 40; i++) m.efecto("entrega", "jarvis");
   assert.equal(m.efectos.length, 24);
   assert.equal(m.voz, "normal");
+});
+
+test("la interfaz quita los emojis (quedan para Telegram)", () => {
+  assert.equal(sinEmojis("📊 <b>Estado</b> ✅ listo"), "<b>Estado</b> listo");
+  assert.equal(sinEmojis("Tomando café ☕"), "Tomando café ");
+  assert.equal(sinEmojis("• Gasto API: $0.42 → ok"), "• Gasto API: $0.42 → ok");
 });

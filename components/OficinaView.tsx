@@ -13,7 +13,10 @@ import { projectProgress } from "@/components/useJarvis";
 import { ConsolaJarvis, type ConsolaApi, type Enviar } from "@/components/oficina3d/ConsolaJarvis";
 import { Minimapa } from "@/components/oficina3d/Minimapa";
 import { useAmbiente } from "@/lib/oficina/useAmbiente";
-import { iconoAmbiente, NOMBRE_CLIMA } from "@/lib/oficina/ambiente";
+import { NOMBRE_CLIMA } from "@/lib/oficina/ambiente";
+import { sinEmojis } from "@/lib/oficina/texto";
+import { IconoAgente, IconoAmbiente, IconoEvento } from "@/components/oficina3d/Iconos";
+import { AudioLines, Camera, ChevronDown, ChevronRight, CircleCheck, CircleDashed, Keyboard, Play, Square, TriangleAlert, Volume2, VolumeX, X } from "lucide-react";
 import { activarSonido, activarVoz, hablar, hayVozSintetica, sonar, sonidoActivo, vozJarvisActiva } from "@/lib/oficina/sonido";
 import type { ModoVoz } from "@/lib/oficina/mundo";
 import { estadisticasDe } from "@/lib/oficina/estadisticas";
@@ -254,7 +257,7 @@ export function OficinaView({ s, enviar }: { s: JarvisState; enviar: Enviar }) {
         if (!lider || lider === slug) continue;
         window.setTimeout(() => {
           nota(slug, r.status === "error" ? "error" : "ok", `Reportando a ${nombre(lider)}…`, 9000);
-          mundo.entregar(slug, lider, () => nota(lider, "ok", "📨 Avisando a Manuel por Telegram", 8000));
+          mundo.entregar(slug, lider, () => nota(lider, "ok", "Avisando a Manuel por Telegram", 8000));
         }, 2800);
       }
     }
@@ -264,25 +267,25 @@ export function OficinaView({ s, enviar }: { s: JarvisState; enviar: Enviar }) {
 
   // Registro de misión: lo último que pasó (ejecuciones y alertas), del más nuevo al más viejo
   const registro = useMemo(() => {
-    type Ev = { id: string; t: number; icono: string; texto: string; slug?: string; tipo: "info" | "ok" | "error" };
+    type Ev = { id: string; t: number; texto: string; slug?: string; rol?: string; tipo: "info" | "ok" | "error" | "alerta" };
     const out: Ev[] = [];
     for (const r of s.runs.slice(0, 30)) {
       const a = porId.get(r.agent_id);
       if (!a) continue;
       const nombre = a.slug === "jarvis" ? "JARVIS" : a.name;
       const ini = new Date(r.started_at ?? r.created_at).getTime();
-      out.push({ id: `${r.id}:i`, t: ini, icono: a.emoji ?? "▶", texto: `${nombre} empezó · ${(r.input ?? "").slice(0, 60)}`, slug: a.slug, tipo: "info" });
+      out.push({ id: `${r.id}:i`, t: ini, texto: sinEmojis(`${nombre} empezó · ${(r.input ?? "").slice(0, 60)}`), slug: a.slug, rol: a.role, tipo: "info" });
       if (r.status === "done" || r.status === "error") {
         const fin = r.finished_at ? new Date(r.finished_at).getTime() : ini + 1;
         out.push({
-          id: `${r.id}:f`, t: Math.max(fin, ini + 1), icono: r.status === "done" ? "✔" : "⚠",
-          texto: `${nombre} · ${(r.status === "done" ? r.summary ?? "terminó" : r.error ?? "falló").slice(0, 70)}`, slug: a.slug, tipo: r.status === "done" ? "ok" : "error",
+          id: `${r.id}:f`, t: Math.max(fin, ini + 1), 
+          texto: sinEmojis(`${nombre} · ${(r.status === "done" ? r.summary ?? "terminó" : r.error ?? "falló").slice(0, 70)}`), slug: a.slug, rol: a.role, tipo: r.status === "done" ? "ok" : "error",
         });
       }
     }
     for (const l of s.logs.slice(0, 20)) {
       if (l.level !== "error" && l.level !== "warn") continue;
-      out.push({ id: `log:${l.id}`, t: new Date(l.created_at).getTime(), icono: l.level === "error" ? "⛔" : "⚠", texto: `${l.source} · ${l.message.slice(0, 70)}`, tipo: "error" });
+      out.push({ id: `log:${l.id}`, t: new Date(l.created_at).getTime(), texto: sinEmojis(`${l.source} · ${l.message.slice(0, 70)}`), tipo: l.level === "error" ? "error" : "alerta" });
     }
     return out.sort((a, b) => b.t - a.t).slice(0, 8);
   }, [s.runs, s.logs, porId]);
@@ -417,18 +420,20 @@ export function OficinaView({ s, enviar }: { s: JarvisState; enviar: Enviar }) {
       const nota = notas.current.get(a.slug);
       const viva = nota && nota.hasta > Date.now() ? nota : undefined;
       const sel = seleccion === a.slug;
-      const texto = viva?.texto ?? (trabajando(a) ? run?.current_step || "Trabajando…" : sel ? mundo.actividad(a.slug) ?? a.last_summary ?? "Libre" : null);
+      const crudo = viva?.texto ?? (trabajando(a) ? run?.current_step || "Trabajando…" : sel ? mundo.actividad(a.slug) ?? a.last_summary ?? "Libre" : null);
+      const texto = crudo ? sinEmojis(crudo) : null;
       const esLider = !!asignacion.get(a.slug)?.lider;
       return {
         slug: a.slug,
         nombre: a.name,
-        emoji: a.emoji ?? null,
+        rol: a.role,
         lider: esLider,
         esJarvis: a.slug === "jarvis",
         trabajando: trabajando(a),
         actividad: mundo.actividad(a.slug),
+        tipoActividad: mundo.tipoActividad(a.slug),
         armadura: esLider ? 0 : 1 + (a.position % 5),
-        globo: texto ? { texto: texto.length > 70 && !sel ? `${texto.slice(0, 67)}…` : texto, tipo: viva?.tipo ?? "trabajo" } : null,
+        globo: texto ? { texto: texto.length > 70 && !sel ? `${texto.slice(0, 67)}…` : texto, tipo: viva?.tipo ?? (trabajando(a) ? "trabajo" : "frase") } : null,
         seleccionado: sel,
       };
     });
@@ -460,8 +465,8 @@ export function OficinaView({ s, enviar }: { s: JarvisState; enviar: Enviar }) {
             </span>
           ) : (
             <span>
-              {proyecto?.status ?? ""} · {deSala.length} agente{deSala.length === 1 ? "" : "s"} · ◐ {curso} · ● {hechas}/{tareas.length}
-              {errSala > 0 && <> · <em className="mal">⚠ {errSala}</em></>}
+              {proyecto?.status ?? ""} · {deSala.length} agente{deSala.length === 1 ? "" : "s"} · <CircleDashed size={11} className="ico" aria-label="en curso" /> {curso} · <CircleCheck size={11} className="ico" aria-label="hechas" /> {hechas}/{tareas.length}
+              {errSala > 0 && <> · <em className="mal"><TriangleAlert size={11} className="ico" aria-label="errores" /> {errSala}</em></>}
             </span>
           )}
         </>
@@ -498,7 +503,7 @@ export function OficinaView({ s, enviar }: { s: JarvisState; enviar: Enviar }) {
         </span>
         <div className="oficina-acciones">
           <button className={`btn btn-ghost small ${tour ? "activo" : ""}`} onClick={() => setTour((x) => !x)} aria-pressed={tour} title="Recorrido automático (T)">
-            {tour ? "■ Detener tour" : "▶ Tour"}
+            {tour ? <><Square size={14} className="ico" aria-hidden="true" /> Detener tour</> : <><Play size={14} className="ico" aria-hidden="true" /> Tour</>}
           </button>
           <button
             className={`btn btn-ghost small ${sonidoOn ? "activo" : ""}`}
@@ -506,7 +511,7 @@ export function OficinaView({ s, enviar }: { s: JarvisState; enviar: Enviar }) {
             aria-pressed={sonidoOn}
             title="Sonidos (M)"
           >
-            {sonidoOn ? "🔊" : "🔇"} Sonido
+            {sonidoOn ? <Volume2 size={15} className="ico" aria-hidden="true" /> : <VolumeX size={15} className="ico" aria-hidden="true" />} Sonido
           </button>
           {hayVozSintetica() && (
             <button
@@ -515,11 +520,11 @@ export function OficinaView({ s, enviar }: { s: JarvisState; enviar: Enviar }) {
               aria-pressed={vozOn}
               title="JARVIS responde y anuncia en voz alta"
             >
-              🗣 Voz
+              <AudioLines size={15} className="ico" aria-hidden="true" /> Voz
             </button>
           )}
-          <button className="btn btn-ghost small" onClick={() => setFotoClave((n) => n + 1)} title="Guardar foto de la escena (F)">📸 Foto</button>
-          <button className="btn btn-ghost small" onClick={() => setAyuda((x) => !x)} aria-expanded={ayuda} title="Atajos (?)">?</button>
+          <button className="btn btn-ghost small" onClick={() => setFotoClave((n) => n + 1)} title="Guardar foto de la escena (F)"><Camera size={15} className="ico" aria-hidden="true" /> Foto</button>
+          <button className="btn btn-ghost small" onClick={() => setAyuda((x) => !x)} aria-expanded={ayuda} title="Atajos (?)" aria-label="Atajos de teclado"><Keyboard size={16} className="ico" aria-hidden="true" /></button>
         </div>
       </div>
       <div className="oficina-salas" role="toolbar" aria-label="Ir a una sala">
@@ -571,7 +576,7 @@ export function OficinaView({ s, enviar }: { s: JarvisState; enviar: Enviar }) {
         {flash && <div className="foto-flash" aria-hidden="true" />}
         <div className="hud-registro" data-abierto={registroAbierto}>
           <button className="hud-titulo" onClick={() => setRegistroAbierto((x) => !x)} aria-expanded={registroAbierto}>
-            <i className="hud-punto" aria-hidden="true" /> Registro de misión {registroAbierto ? "▾" : "▸"}
+            <i className="hud-punto" aria-hidden="true" /> Registro de misión {registroAbierto ? <ChevronDown size={13} className="ico" aria-hidden="true" /> : <ChevronRight size={13} className="ico" aria-hidden="true" />}
           </button>
           {registroAbierto && (
             <ol>
@@ -579,9 +584,12 @@ export function OficinaView({ s, enviar }: { s: JarvisState; enviar: Enviar }) {
                 <li key={ev.id} className={ev.tipo}>
                   <span className="hud-hora">{new Date(ev.t).toLocaleTimeString("es-CO", { hour: "2-digit", minute: "2-digit" })}</span>
                   {ev.slug ? (
-                    <button className="enlace" onClick={() => setSeleccion(ev.slug!)}>{ev.icono} {ev.texto}</button>
+                    <button className="enlace" onClick={() => setSeleccion(ev.slug!)}>
+                      {ev.tipo === "info" ? <IconoAgente slug={ev.slug} rol={ev.rol} tam={13} /> : <IconoEvento tipo={ev.tipo === "ok" ? "ok" : "error"} />}
+                      {ev.texto}
+                    </button>
                   ) : (
-                    <span>{ev.icono} {ev.texto}</span>
+                    <span><IconoEvento tipo={ev.tipo === "alerta" ? "alerta" : "error"} /> {ev.texto}</span>
                   )}
                 </li>
               ))}
@@ -600,16 +608,16 @@ export function OficinaView({ s, enviar }: { s: JarvisState; enviar: Enviar }) {
             />
           )}
           <div className="hud-ambiente" title={`Hora y clima reales de la ciudad (${ambiente.fase}). La ciudad cambia de día, de noche y cuando llueve.`}>
-            {iconoAmbiente(ambiente)} {`${String(Math.floor(ambiente.hora)).padStart(2, "0")}:${String(Math.floor((ambiente.hora % 1) * 60)).padStart(2, "0")}`}
+            <IconoAmbiente a={ambiente} /> {`${String(Math.floor(ambiente.hora)).padStart(2, "0")}:${String(Math.floor((ambiente.hora % 1) * 60)).padStart(2, "0")}`}
             {ambiente.temperatura != null && ` · ${Math.round(ambiente.temperatura)}°C`} · {NOMBRE_CLIMA[ambiente.clima]}
           </div>
-          {tour && <div className="hud-tour">▶ Recorrido automático · toca para detener</div>}
+          {tour && <div className="hud-tour"><Play size={12} className="ico" aria-hidden="true" /> Recorrido automático · toca para detener</div>}
         </div>
         <ConsolaJarvis ref={consola} enviar={enviar} onModo={modoVoz} onRespuesta={alResponder} compacta={compacta} />
         {ayuda && (
           <div className="oficina-ayuda-modal" role="dialog" aria-label="Atajos de teclado" onClick={() => setAyuda(false)}>
             <div className="panel" onClick={(e) => e.stopPropagation()}>
-              <div className="panel-title"><h3>Atajos</h3><button className="btn btn-ghost small" onClick={() => setAyuda(false)} aria-label="Cerrar">✕</button></div>
+              <div className="panel-title"><h3>Atajos</h3><button className="btn btn-ghost small" onClick={() => setAyuda(false)} aria-label="Cerrar"><X size={16} aria-hidden="true" /></button></div>
               <dl className="atajos">
                 <dt><kbd>1</kbd>–<kbd>9</kbd></dt><dd>Volar a una sala</dd>
                 <dt><kbd>0</kbd></dt><dd>Ver todo el edificio</dd>
@@ -638,7 +646,7 @@ export function OficinaView({ s, enviar }: { s: JarvisState; enviar: Enviar }) {
           a={agenteSel}
           sala={salaSel?.nombre}
           lider={!!asignacion.get(agenteSel.slug)?.lider}
-          equipo={equipoSel.map((x) => ({ slug: x.slug, nombre: x.name, emoji: x.emoji ?? "", trabajando: trabajando(x), paso: ultimoRun.get(x.id)?.current_step ?? null }))}
+          equipo={equipoSel.map((x) => ({ slug: x.slug, nombre: x.name, rol: x.role, trabajando: trabajando(x), paso: ultimoRun.get(x.id)?.current_step ?? null }))}
           runs={s.runs.filter((r) => r.agent_id === agenteSel.id)}
           actividad={mundo.actividad(agenteSel.slug)}
           onClose={() => setSeleccion(null)}
@@ -655,7 +663,7 @@ export function OficinaView({ s, enviar }: { s: JarvisState; enviar: Enviar }) {
 interface Miembro {
   slug: string;
   nombre: string;
-  emoji: string;
+  rol: string;
   trabajando: boolean;
   paso: string | null;
 }
@@ -668,15 +676,15 @@ function PanelAgente({ a, sala, lider, equipo, runs, actividad, onClose, onElegi
   return (
     <aside className="panel oficina-panel" aria-label={`Detalle de ${a.name}`}>
       <div className="panel-title">
-        <h3>{a.emoji ? `${a.emoji} ` : ""}{a.name}</h3>
-        <button className="btn btn-ghost small" onClick={onClose} aria-label="Cerrar">✕</button>
+        <h3><IconoAgente slug={a.slug} rol={a.role} tam={18} /> {a.name}</h3>
+        <button className="btn btn-ghost small" onClick={onClose} aria-label="Cerrar"><X size={16} aria-hidden="true" /></button>
       </div>
       <p className="muted small">
         {lider && <span className="insignia-lider">Líder de sala</span>} {a.role}
         {sala ? ` · ${sala}` : ""}
         {!a.is_leader && <> · {a.runtime === "local" ? "motor local (tu PC)" : a.runtime === "api" ? "servidor" : "chat Claude"} · {a.model.replace("claude-", "")}</>}
       </p>
-      {a.personality && <p className="small personalidad">“{a.personality}”</p>}
+      {a.personality && <p className="small personalidad">“{sinEmojis(a.personality)}”</p>}
       {lider && equipo.length > 0 && (
         <>
           <p className="small" style={{ marginBottom: 4 }}><b>Su equipo</b></p>
@@ -684,7 +692,7 @@ function PanelAgente({ a, sala, lider, equipo, runs, actividad, onClose, onElegi
             {equipo.map((m) => (
               <li key={m.slug}>
                 <span className={`estado-punto ${m.trabajando ? "working" : "idle"}`} />
-                <button className="enlace small" onClick={() => onElegir(m.slug)}>{m.emoji} {m.nombre}</button>
+                <button className="enlace small" onClick={() => onElegir(m.slug)}><IconoAgente slug={m.slug} rol={m.rol} tam={13} /> {m.nombre}</button>
                 <span className="muted small"> · {m.trabajando ? m.paso || "trabajando" : "libre"}</span>
               </li>
             ))}
@@ -696,11 +704,11 @@ function PanelAgente({ a, sala, lider, equipo, runs, actividad, onClose, onElegi
       )}
       <p>
         <span className={`estado-punto ${actual ? "working" : a.status}`} /> {actual || a.status === "working" ? "Trabajando" : a.status === "error" ? "Con error" : actividad ?? "Libre"}
-        {actual?.current_step && <> — <i>{actual.current_step}</i></>}
+        {actual?.current_step && <> — <i>{sinEmojis(actual.current_step)}</i></>}
       </p>
       {a.last_summary && (
         <p className="small">
-          <b>Último trabajo:</b> {a.last_summary} <span className="muted">({ago(a.last_run_at)})</span>
+          <b>Último trabajo:</b> {sinEmojis(a.last_summary)} <span className="muted">({ago(a.last_run_at)})</span>
         </p>
       )}
       <Estadisticas runs={runs} />
@@ -709,7 +717,7 @@ function PanelAgente({ a, sala, lider, equipo, runs, actividad, onClose, onElegi
         {runs.slice(0, 6).map((r) => (
           <li key={r.id}>
             <span className={`estado-punto ${r.status === "done" ? "idle" : r.status === "error" ? "error" : "working"}`} />
-            <span className="small">{(r.summary || r.input || "").slice(0, 90)}</span>
+            <span className="small">{sinEmojis((r.summary || r.input || "").slice(0, 90))}</span>
             <span className="muted small"> · {ago(r.created_at)}</span>
           </li>
         ))}
@@ -757,7 +765,7 @@ function ListaRespaldo({ robots, onElegir, motivo }: { robots: InfoRobot[]; onEl
           <li key={r.slug}>
             <span className={`estado-punto ${r.trabajando ? "working" : "idle"}`} />
             <button className="enlace" onClick={() => onElegir(r.slug)}>
-              {r.esJarvis ? "J.A.R.V.I.S." : `${r.emoji ?? ""} ${r.nombre}`}
+              <IconoAgente slug={r.slug} rol={r.rol} tam={14} /> {r.esJarvis ? "J.A.R.V.I.S." : r.nombre}
             </button>
             {r.lider && <span className="insignia-lider">Líder</span>}
             <span className="muted small"> {r.globo?.texto ?? (r.trabajando ? "trabajando" : "libre")}</span>

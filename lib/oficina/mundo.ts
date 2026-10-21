@@ -37,13 +37,13 @@ const centro = (c: Celda) => ({ x: c.c + 0.5, z: c.r + 0.5 });
 const VEL = 2.4; // celdas por segundo
 
 const TEXTO_DESCANSO: Record<Descanso["tipo"], string> = {
-  sofa: "Descansando en el sofá 🛋️",
-  cafe: "Tomando café ☕",
-  agua: "Tomando agua 💧",
-  juego: "Jugando en la mesa holográfica 🎮",
-  arcade: "En la máquina arcade 🕹️",
-  puff: "Relajándose en el puff 😌",
-  baile: "Bailando en la pista 🎶",
+  sofa: "Descansando en el sofá",
+  cafe: "Tomando café",
+  agua: "Tomando agua",
+  juego: "Jugando en la mesa holográfica",
+  arcade: "En la máquina arcade",
+  puff: "Relajándose en el puff",
+  baile: "Bailando en la pista",
 };
 
 /** Estado de la voz de JARVIS (lo dibuja el aura del holograma) */
@@ -246,12 +246,19 @@ export class Mundo {
     return "Idle";
   }
 
+  /** Tipo de actividad libre (para el icono junto al nombre) */
+  tipoActividad(slug: string): Descanso["tipo"] | "yendo" | null {
+    const r = this.robots.get(slug);
+    if (!r || r.trabajando || !r.descanso) return null;
+    return r.descansando ? r.descanso.tipo : "yendo";
+  }
+
   /** Qué está haciendo, en palabras (para el globo y el panel). */
   actividad(slug: string): string | null {
     const r = this.robots.get(slug);
     if (!r || r.trabajando) return null;
     if (r.descanso && r.descansando) return TEXTO_DESCANSO[r.descanso.tipo];
-    if (r.descanso) return "Yendo a descansar 🚶";
+    if (r.descanso) return "Yendo a descansar";
     return null;
   }
 }

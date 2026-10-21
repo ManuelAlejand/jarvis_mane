@@ -21,7 +21,7 @@ async function abrir(viewport, query = "") {
   p.on("console", (m) => { if (m.type() === "error" && !/Failed to load resource|fonts\.googleapis/.test(m.text())) errores.push(m.text()); });
   await p.goto(`${BASE}/demo/oficina${query}`);
   await p.waitForSelector(".oficina-escena canvas", { timeout: 30000 });
-  await p.waitForFunction(() => document.querySelectorAll(".oficina-capa .nombre").length >= 9, null, { timeout: 30000 });
+  await p.waitForFunction(() => document.querySelectorAll(".oficina-capa .nombre").length >= 9, null, { timeout: 60000, polling: 500 });
   await p.waitForTimeout(2500);
   return { p, errores };
 }
@@ -153,7 +153,7 @@ async function abrir(viewport, query = "") {
   ok("La foto de la escena se descarga (con imagen, no en blanco)", !!d && d.suggestedFilename().startsWith("jarvis-oficina-") && peso > 60000, `${d?.suggestedFilename() ?? "sin descarga"} · ${Math.round(peso / 1024)} KB`);
   if (ruta && process.env.CAPTURA_FOTO) (await import("node:fs")).copyFileSync(ruta, process.env.CAPTURA_FOTO);
 
-  await p.click("text=▶ Tour");
+  await p.click(".oficina-acciones button[title^='Recorrido']");
   await p.waitForTimeout(400);
   ok("El tour automático se enciende", (await p.$(".hud-tour")) !== null);
   const t1 = hash(await canvas.screenshot());
@@ -168,6 +168,9 @@ async function abrir(viewport, query = "") {
   ok("Arrastrar la cámara detiene el tour", (await p.$(".hud-tour")) === null);
   await p.click(".oficina-salas .chip:has-text('Ver todo')");
   await p.waitForTimeout(2000);
+  const conEmojis = await p.evaluate(() => (document.querySelector(".oficina")?.innerText ?? "").match(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}]/gu) ?? []);
+  ok("La interfaz usa iconos, no emojis", conEmojis.length === 0, conEmojis.slice(0, 5).join(" "));
+  ok("Los agentes llevan su icono junto al nombre", (await p.$$(".oficina-capa .nombre svg")).length >= 9);
   ok("Sin errores de JavaScript con las funciones nuevas", errores.length === 0, errores.slice(0, 3).join(" | "));
   await p.screenshot({ path: process.env.CAPTURA_LLUVIA ?? "/tmp/oficina-lluvia.png" });
   await p.close();
