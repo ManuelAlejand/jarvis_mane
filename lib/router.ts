@@ -4,7 +4,7 @@ import { aiAvailable, BudgetExceeded, classify, RateLimited, type Classification
 import { findAgent, listAgents, matchAgentByKeyword, startRun } from "@/lib/agents";
 import { runExplorador } from "@/lib/trends";
 import { after } from "next/server";
-import type { Project, Task, TaskStatus } from "@/lib/types";
+import type { Project, ProjectStatus, Task, TaskStatus } from "@/lib/types";
 import { STATUS_LABEL } from "@/lib/types";
 
 /**
@@ -31,6 +31,15 @@ const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replac
 const norm = (s: string) =>
   s.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[¿?¡!.,]/g, "").trim();
 
+const PROJECT_STATUS_ALIASES: Record<string, ProjectStatus> = {
+  idea: "idea", ideas: "idea",
+  activo: "activo", activa: "activo", activar: "activo", activalo: "activo", empezar: "activo", empieza: "activo",
+  iniciar: "activo", inicia: "activo", arrancar: "activo", arranca: "activo", en_curso: "activo", curso: "activo", progreso: "activo",
+  pausado: "pausado", pausa: "pausado", pausar: "pausado", pausalo: "pausado", congelar: "pausado",
+  terminado: "terminado", terminar: "terminado", termina: "terminado", cerrar: "terminado", cierra: "terminado", finalizar: "terminado",
+};
+const PROJECT_STATUS_ICON: Record<ProjectStatus, string> = { idea: "💡", activo: "🚀", pausado: "⏸️", terminado: "🏁" };
+
 const STATUS_ALIASES: Record<string, TaskStatus> = {
   backlog: "backlog", pendiente: "backlog", todo: "backlog",
   curso: "en_curso", en_curso: "en_curso", encurso: "en_curso", haciendo: "en_curso", doing: "en_curso",
@@ -49,6 +58,7 @@ const HELP = [
   "/hecho 12 — marcar la tarea 12 como hecha",
   "/mover 12 en_curso — backlog · en_curso · bloqueada · hecha",
   "/proyecto [nombre] — detalle (sin nombre: lista)",
+  "/activar auditoria · /pausar · /terminar — cambiar estado de un proyecto",
   "/gasto — gasto de API del mes",
   "/tendencias — 5 ideas basadas en lo más visto hoy",
   "/agentes — quién está trabajando y en qué",
@@ -92,8 +102,22 @@ export async function route(input: string, actor: Actor): Promise<Reply> {
       case "mover":
         return await mover(args, actor);
       case "proyecto":
-      case "proyectos":
-        return await proyecto(args);
+      case "proyectos": {
+        // "/proyecto auditoria activo" también cambia el estado
+        const m = args.match(/^(.+?)\s+(\S+)$/);
+        const st = m ? PROJECT_STATUS_ALIASES[norm(m[2])] : undefined;
+        return m && st ? await estadoProyecto(m[1], st, actor) : await proyecto(args);
+      }
+      case "activar":
+        return await estadoProyecto(args, "activo", actor);
+      case "pausar":
+        return await estadoProyecto(args, "pausado", actor);
+      case "terminar":
+        return await estadoProyecto(args, "terminado", actor);
+      case "_proyecto_estado": {
+        const [st, ...resto] = args.split(" ");
+        return await estadoProyecto(resto.join(" "), PROJECT_STATUS_ALIASES[st], actor);
+      }
       case "gasto":
         return await gasto();
       case "agentes":
@@ -139,6 +163,14 @@ function shortcut(raw: string): [string, string] {
     return what ? ["proyecto", what] : ["estado", ""];
   }
   if (/^(estado|resumen|status)$/.test(t)) return ["estado", ""];
+  // "empezaremos el proyecto auditoría, pásalo a activo" · "pon el proyecto clipping en pausa"
+  const frase = t.match(/proyecto\s+([\w\s-]+?)\b.*\b(?:a|en)\s+(activo|pausa|pausado|terminado|idea)\b/);
+  if (frase && PROJECT_STATUS_ALIASES[frase[2]]) return ["_proyecto_estado", `${frase[2]} ${frase[1]}`];
+  const accion = t.match(/^(activa|activar|pausa|pausar|termina|terminar|cierra|cerrar)\s+(?:el\s+|la\s+)?(?:proyecto\s+)?(?:de\s+)?(.+)$/);
+  if (accion) {
+    const st = PROJECT_STATUS_ALIASES[accion[1]];
+    return [st === "activo" ? "activar" : st === "pausado" ? "pausar" : "terminar", accion[2]];
+  }
   if (/^(tendencias|que esta de moda|que es tendencia|lo mas visto)/.test(t)) return ["tendencias", ""];
   if (/(gasto|cuanto (llevo|he gastado|gastamos)|presupuesto)/.test(t)) return ["gasto", ""];
   if (/^(ayuda|comandos|help)$/.test(t)) return ["ayuda", ""];
@@ -332,6 +364,22 @@ export async function applyClassification(c: Classification, original: string, a
       r = await nueva(`${title}${slug} !${prio}`, actor, ["ia"]);
       break;
     }
+    case "set_project_status": {
+      const st = c.new_status ? PROJECT_STATUS_ALIASES[norm(c.new_status)] : undefined;
+      if (c.project_slug && st) {
+        r = await estadoProyecto(c.project_slug, st, actor);
+      } else {
+        r = { text: "Entendí que quieres cambiar el estado de un proyecto, pero no supe cuál o a qué estado. Usa: /activar &lt;proyecto&gt;, /pausar o /terminar." };
+      }
+      break;
+    }
+    case "move_task": {
+      const st = c.new_status ? STATUS_ALIASES[norm(c.new_status)] : undefined;
+      r = c.task_ref && st
+        ? await mover(`${c.task_ref} ${st}`, actor)
+        : { text: "Entendí que quieres mover una tarea, pero me faltó el número o el estado. Usa: /mover 12 en_curso" };
+      break;
+    }
     case "create_task":
       r = await nueva(`${title}${slug} !${prio}`, actor, ["ia"]);
       break;
@@ -376,6 +424,30 @@ async function mover(args: string, actor: Actor): Promise<Reply> {
   if (error) throw error;
   await log(actor.source, `Tarea #${ref} → ${STATUS_LABEL[status]}: ${task.title}`);
   return { text: `${STATUS_ICON[status]} Tarea <code>#${ref}</code> → <b>${STATUS_LABEL[status]}</b>\n${esc(task.title)}` };
+}
+
+async function estadoProyecto(q: string, status: ProjectStatus, actor: Actor): Promise<Reply> {
+  if (!actor.isAdmin) return { text: "Solo un administrador puede cambiar el estado de un proyecto." };
+  const query = q.trim();
+  if (!query) return { text: "¿Cuál proyecto? Ejemplo: /activar auditoria. Lista: /proyecto" };
+  const p = await findProject(query);
+  if (!p) return { text: `No encontré el proyecto «${esc(query)}». Usa /proyecto para ver la lista.` };
+  if (p.status === status) return { text: `${PROJECT_STATUS_ICON[status]} <b>${esc(p.name)}</b> ya está en <b>${status}</b>.` };
+  const db = adminClient();
+  const { error } = await db.from("projects").update({ status, updated_at: new Date().toISOString() }).eq("id", p.id);
+  if (error) throw error;
+  await log(actor.source, `Proyecto ${p.slug}: ${p.status} → ${status}`);
+  const extra: string[] = [];
+  if (status === "activo") {
+    const { data } = await db.from("tasks").select("ref,title,status").eq("project_id", p.id)
+      .neq("status", "hecha").order("position").limit(3);
+    const prox = (data ?? []) as Pick<Task, "ref" | "title" | "status">[];
+    if (prox.length) {
+      extra.push("", "<b>Primeras tareas:</b>", ...prox.map((t) => `${STATUS_ICON[t.status]} <code>#${t.ref}</code> ${esc(t.title)}`));
+      extra.push("", `Empezar una: /mover ${prox[0].ref} en_curso · Ver todas: /tareas ${p.slug}`);
+    }
+  }
+  return { text: [`${PROJECT_STATUS_ICON[status]} Proyecto <b>${esc(p.name)}</b>: ${p.status} → <b>${status}</b>`, ...extra].join("\n") };
 }
 
 async function proyecto(args: string): Promise<Reply> {

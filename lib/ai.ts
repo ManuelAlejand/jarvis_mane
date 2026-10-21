@@ -137,6 +137,8 @@ export async function callClaude(call: ClaudeCall): Promise<{ text: string; cost
 export type Intent =
   | "create_task"
   | "run_agent"
+  | "set_project_status"
+  | "move_task"
   | "query_status"
   | "query_tasks"
   | "query_project"
@@ -148,6 +150,8 @@ export interface Classification {
   intent: Intent;
   project_slug: string | null;
   agent_slug: string | null;
+  new_status: string | null;
+  task_ref: number | null;
   title: string | null;
   priority: number;
   scope: "youtube_shorts" | "system_automations" | "crm_communications" | "core";
@@ -159,16 +163,23 @@ const SCHEMA = {
   properties: {
     intent: {
       type: "string",
-      enum: ["create_task", "run_agent", "query_status", "query_tasks", "query_project", "query_spend", "complex", "chitchat"],
+      enum: ["create_task", "run_agent", "set_project_status", "move_task", "query_status", "query_tasks", "query_project", "query_spend", "complex", "chitchat"],
     },
     project_slug: { anyOf: [{ type: "string" }, { type: "null" }] },
     agent_slug: { anyOf: [{ type: "string" }, { type: "null" }] },
+    new_status: {
+      anyOf: [
+        { type: "string", enum: ["idea", "activo", "pausado", "terminado", "backlog", "en_curso", "bloqueada", "hecha"] },
+        { type: "null" },
+      ],
+    },
+    task_ref: { anyOf: [{ type: "integer" }, { type: "null" }] },
     title: { anyOf: [{ type: "string" }, { type: "null" }] },
     priority: { type: "integer", enum: [1, 2, 3] },
     scope: { type: "string", enum: ["youtube_shorts", "system_automations", "crm_communications", "core"] },
     reply: { anyOf: [{ type: "string" }, { type: "null" }] },
   },
-  required: ["intent", "project_slug", "agent_slug", "title", "priority", "scope", "reply"],
+  required: ["intent", "project_slug", "agent_slug", "new_status", "task_ref", "title", "priority", "scope", "reply"],
   additionalProperties: false,
 };
 
@@ -178,6 +189,8 @@ Recibes un mensaje corto en español (a veces con errores de escritura o jerga) 
 
 ## Intenciones
 - run_agent: el usuario pide un trabajo que hace uno de los agentes de la lista (por ejemplo buscar ideas de video, escribir un guion). Elige el agente cuyo rol encaje. Tiene prioridad sobre create_task cuando un agente puede hacerlo ahora.
+- set_project_status: el usuario quiere cambiar el estado de un PROYECTO: empezarlo, activarlo, arrancarlo, ponerlo en marcha (activo), pausarlo o congelarlo (pausado), terminarlo o cerrarlo (terminado), o devolverlo a idea. Ejemplos: "empezaremos el proyecto auditoría, pásalo a activo", "pausa clipping", "ya terminamos lo de youtube". NUNCA lo conviertas en create_task.
+- move_task: el usuario quiere cambiar el estado de una TAREA concreta por su número ("la 12 ya está hecha", "pon la tarea 7 en curso", "la #5 está bloqueada").
 - create_task: el usuario pide hacer, recordar, revisar, agregar, arreglar o investigar algo concreto que ningún agente resuelve. Ejemplos: "recuérdame comprar el dominio", "hay que revisar el webhook".
 - query_status: pregunta general por el estado ("cómo vamos", "qué tal todo", "dame un resumen").
 - query_tasks: pide ver tareas o pendientes, en general o de un proyecto.
@@ -188,6 +201,8 @@ Recibes un mensaje corto en español (a veces con errores de escritura o jerga) 
 
 ## Campos
 - project_slug: el slug EXACTO de la lista de proyectos que mejor encaje, o null. Nunca inventes slugs.
+- new_status: para set_project_status uno de idea · activo · pausado · terminado; para move_task uno de backlog · en_curso · bloqueada · hecha. Si no, null.
+- task_ref: para move_task, el número de la tarea; si no, null.
 - agent_slug: solo para run_agent, el slug EXACTO del agente; si no, null. Nunca elijas un agente marcado (desactivado).
 - title: para create_task o complex, un título breve (máx. 80 caracteres) en infinitivo. Para run_agent, la orden reescrita de forma clara y completa para el agente. Para el resto, null.
 - priority: 1 si hay urgencia ("urgente", "ya", "hoy", "se cayó"), 3 si poca importancia ("cuando puedas"), si no 2.
