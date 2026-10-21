@@ -125,11 +125,16 @@ def correr(args: list[str], video: dict, agente: str, etiqueta: str, timeout: in
     return texto
 
 
+# Modelo para los agentes del PC. "sonnet" gasta bastante menos del límite semanal del plan que "opus".
+CLAUDE_MODELO = os.environ.get("CLAUDE_MODELO", "sonnet").strip()
+
+
 def comando_claude() -> list[str]:
     ruta = os.environ.get("CLAUDE_CMD") or shutil.which("claude")
     if not ruta:
         raise Fallo("No encuentro Claude Code (comando 'claude'). Instálalo e inicia sesión con tu cuenta Pro.")
-    return ["cmd", "/c", ruta] if ruta.lower().endswith((".cmd", ".bat")) else [ruta]
+    base = ["cmd", "/c", ruta] if ruta.lower().endswith((".cmd", ".bat")) else [ruta]
+    return base + (["--model", CLAUDE_MODELO] if CLAUDE_MODELO else [])
 
 
 HERRAMIENTAS = ",".join([
