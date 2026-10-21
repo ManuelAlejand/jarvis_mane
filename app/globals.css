@@ -345,3 +345,4 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .oficina-respaldo { position: absolute; inset: 0; overflow: auto; padding: 16px; }
 .oficina-respaldo ul { list-style: none; padding: 0; display: grid; gap: 8px; }
 .oficina-respaldo li { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.agente-capa .actividad { margin-left: 4px; }

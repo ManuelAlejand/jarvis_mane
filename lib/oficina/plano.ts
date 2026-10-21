@@ -2,6 +2,10 @@
  * Plano de la Oficina 3D de JARVIS: salas por proyecto sobre una rejilla de celdas de 1×1.
  * Cada celda (c, r) tiene su centro en el mundo en x = c + 0.5, z = r + 0.5 (y hacia arriba).
  * Se usa para colocar muebles y para que los robots encuentren el camino (A*).
+ *
+ * Cada sala de proyecto (20×14) tiene: zona de trabajo (6 escritorios + el del líder al fondo) y
+ * zona de descanso (sofá, café, agua, mesa de juego holográfica, arcade, puffs y pista de baile).
+ * Rotación (rot): 0 = mira hacia +z, π/2 = +x, −π/2 = −x, π = −z (hacia la pared de las pantallas).
  */
 
 export interface SalaSpec {
@@ -25,12 +29,35 @@ export interface Puesto {
   entrega: Celda;
 }
 
+export type TipoDescanso = "sofa" | "cafe" | "agua" | "juego" | "arcade" | "puff" | "baile";
+
+/** Lugar de la zona de descanso donde un agente libre puede pasar el rato. */
+export interface Descanso {
+  celda: Celda;
+  tipo: TipoDescanso;
+  rot: number;
+}
+
+/** Mueble decorativo (solo se dibuja; si bloquea, ya está marcado en `bloqueo`). */
+export interface Mueble {
+  tipo:
+    | "sofa" | "mesita" | "cafetera" | "dispensador" | "mesaJuego" | "arcade" | "puff" | "alfombra"
+    | "planta" | "estanteria" | "pantalla" | "divisor" | "pista";
+  c: number;
+  r: number;
+  w: number;
+  h: number;
+  rot?: number;
+}
+
 export interface Sala extends SalaSpec {
   c0: number;
   r0: number;
   w: number;
   h: number;
   puestos: Puesto[];
+  descansos: Descanso[];
+  muebles: Mueble[];
   /** Mesa holográfica del Núcleo (2×2) */
   holo?: Celda;
 }
@@ -45,13 +72,13 @@ export interface Plano {
   salas: Sala[];
 }
 
-export const SALA_W = 12;
-export const SALA_H = 12;
+export const SALA_W = 20;
+export const SALA_H = 14;
 const POR_FILA = 3;
 
-/** El primero es el del líder: al fondo de la sala, mirando hacia su equipo. */
+/** El primero es el del líder: al fondo de la zona de trabajo, mirando hacia su equipo. */
 const ESCRITORIOS = [
-  { x: 5, y: 9 },
+  { x: 5, y: 10 },
   { x: 1, y: 1 },
   { x: 5, y: 1 },
   { x: 9, y: 1 },
@@ -59,6 +86,8 @@ const ESCRITORIOS = [
   { x: 5, y: 5 },
   { x: 9, y: 5 },
 ];
+
+const D = Math.PI / 2;
 
 export function generarPlano(specs: SalaSpec[]): Plano {
   const filas = Math.max(1, Math.ceil(specs.length / POR_FILA));
@@ -83,28 +112,81 @@ export function generarPlano(specs: SalaSpec[]): Plano {
     const c0 = 1 + fc * (SALA_W + 1);
     const r0 = 1 + fr * (SALA_H + 1);
     for (let y = 0; y < SALA_H; y++) for (let x = 0; x < SALA_W; x++) libre(c0 + x, r0 + y);
-    if (fc > 0) for (const y of [3, 4, 5]) libre(c0 - 1, r0 + y); // puerta a la sala de la izquierda
-    if (fr > 0) for (const x of [4, 7]) libre(c0 + x, r0 - 1); // puerta a la sala de arriba
+    if (fc > 0) for (const y of [4, 9, 10]) libre(c0 - 1, r0 + y); // puertas a la sala de la izquierda
+    if (fr > 0) for (const x of [3, 4, 14]) libre(c0 + x, r0 - 1); // puertas a la sala de arriba
 
     const puestos: Puesto[] = [];
+    const descansos: Descanso[] = [];
+    const muebles: Mueble[] = [];
     let holo: Celda | undefined;
-    const lista = s.tipo === "nucleo" ? [{ x: 4, y: 1 }] : ESCRITORIOS;
-    for (const d of lista) {
-      const mesa = { c: c0 + d.x, r: r0 + d.y };
+    const m = (tipo: Mueble["tipo"], x: number, y: number, w: number, h: number, bloquea: boolean, rot = 0) => {
+      muebles.push({ tipo, c: c0 + x, r: r0 + y, w, h, rot });
+      if (bloquea) ocupar(c0 + x, r0 + y, w, h);
+    };
+    const lugar = (tipo: TipoDescanso, x: number, y: number, rot: number) => descansos.push({ tipo, celda: { c: c0 + x, r: r0 + y }, rot });
+    const escritorio = (x: number, y: number) => {
+      const mesa = { c: c0 + x, r: r0 + y };
       ocupar(mesa.c, mesa.r, 3, 3); // mesa (3×2) + fila de la silla: nadie camina por las sillas
       bloqueo[at(mesa.c, mesa.r + 2)] = 0;
       bloqueo[at(mesa.c + 2, mesa.r + 2)] = 0;
-      puestos.push({
-        mesa,
-        silla: { c: mesa.c + 1, r: mesa.r + 2 },
-        entrega: { c: d.x + 2 < SALA_W ? mesa.c + 2 : mesa.c, r: mesa.r + 2 },
-      });
-    }
+      puestos.push({ mesa, silla: { c: mesa.c + 1, r: mesa.r + 2 }, entrega: { c: mesa.c + 2, r: mesa.r + 2 } });
+    };
+
     if (s.tipo === "nucleo") {
-      holo = { c: c0 + 5, r: r0 + 5 };
+      // Consola de JARVIS, mesa holográfica grande y una sala de estar
+      escritorio(8, 1);
+      holo = { c: c0 + 9, r: r0 + 6 };
       ocupar(holo.c, holo.r, 2, 2);
+      m("alfombra", 6, 4, 8, 6, false);
+      m("sofa", 2, 11, 3, 1, true, Math.PI);
+      m("mesita", 2, 9, 3, 1, true);
+      m("sofa", 15, 11, 3, 1, true, Math.PI);
+      m("mesita", 15, 9, 3, 1, true);
+      for (const x of [2, 3, 4]) lugar("sofa", x, 11, Math.PI);
+      for (const x of [15, 16, 17]) lugar("sofa", x, 11, Math.PI);
+      m("cafetera", 19, 6, 1, 1, true);
+      lugar("cafe", 18, 6, D);
+      m("estanteria", 0, 0, 3, 1, true);
+      m("estanteria", 17, 0, 3, 1, true);
+      m("planta", 0, 13, 1, 1, true);
+      m("planta", 19, 13, 1, 1, true);
+      m("planta", 0, 5, 1, 1, true);
+      m("pantalla", 3, -1, 4, 1, false);
+      m("pantalla", 13, -1, 4, 1, false);
+    } else {
+      for (const d of ESCRITORIOS) escritorio(d.x, d.y);
+      // Separador con jardineras entre trabajo y descanso (con paso en y = 4 y 8-9)
+      m("divisor", 13, 0, 1, 4, true);
+      m("divisor", 13, 5, 1, 3, true);
+      m("divisor", 13, 10, 1, 4, true);
+      // Zona de descanso
+      m("alfombra", 14, 0, 6, 14, false);
+      m("sofa", 15, 1, 3, 1, true, 0);
+      m("mesita", 15, 3, 3, 1, true);
+      for (const x of [15, 16, 17]) lugar("sofa", x, 1, 0);
+      m("cafetera", 19, 6, 1, 1, true);
+      lugar("cafe", 18, 6, D);
+      m("dispensador", 19, 8, 1, 1, true);
+      lugar("agua", 18, 8, D);
+      m("mesaJuego", 15, 9, 2, 2, true);
+      lugar("juego", 14, 9, D);
+      lugar("juego", 17, 10, -D);
+      m("arcade", 19, 12, 1, 1, true);
+      lugar("arcade", 18, 12, D);
+      m("puff", 14, 12, 1, 1, true);
+      m("puff", 15, 13, 1, 1, true);
+      lugar("puff", 14, 12, Math.PI);
+      lugar("puff", 15, 13, Math.PI);
+      m("pista", 15, 5, 2, 2, false);
+      lugar("baile", 16, 6, 0);
+      // Decoración de la zona de trabajo
+      m("planta", 0, 13, 1, 1, true);
+      m("planta", 12, 0, 1, 1, true);
+      m("estanteria", 12, 10, 1, 3, true);
+      m("pantalla", 2, -1, 4, 1, false);
+      m("pantalla", 7, -1, 4, 1, false);
     }
-    salas.push({ ...s, c0, r0, w: SALA_W, h: SALA_H, puestos, holo });
+    salas.push({ ...s, c0, r0, w: SALA_W, h: SALA_H, puestos, descansos, muebles, holo });
   });
 
   return { cols, rows, bloqueo, pared, salas };
@@ -153,7 +235,7 @@ export function camino(p: Plano, desde: Celda, hasta: Celda): Celda[] {
 
 /** Celda libre al azar dentro de una sala (para pasear). */
 export function celdaLibre(p: Plano, s: Sala): Celda {
-  for (let k = 0; k < 40; k++) {
+  for (let k = 0; k < 60; k++) {
     const c = s.c0 + Math.floor(Math.random() * s.w);
     const r = s.r0 + Math.floor(Math.random() * s.h);
     if (!p.bloqueo[r * p.cols + c]) return { c, r };

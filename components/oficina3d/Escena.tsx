@@ -14,6 +14,7 @@ import type { OrbitControls as OrbitImpl } from "three-stdlib";
 import type { Anim, Mundo } from "@/lib/oficina/mundo";
 import type { Plano, Puesto, Sala } from "@/lib/oficina/plano";
 import { Ciudad } from "@/components/oficina3d/Ciudad";
+import { Mobiliario } from "@/components/oficina3d/Mobiliario";
 
 const ROBOT_URL = "/oficina3d/robot.glb";
 const ALTURA_ROBOT = 1.6;
@@ -35,6 +36,8 @@ export interface InfoRobot {
   lider: boolean;
   esJarvis: boolean;
   trabajando: boolean;
+  /** Qué hace cuando está libre (descansando, tomando café…) */
+  actividad: string | null;
   armadura: number;
   globo: { texto: string; tipo: "trabajo" | "ok" | "error" | "frase" } | null;
   seleccionado: boolean;
@@ -113,6 +116,7 @@ export function Escena(props: Props) {
               onKeyDown={(e) => e.key === "Enter" && props.onSeleccionar(r.slug)}
             >
               {r.esJarvis ? "J.A.R.V.I.S." : `${r.emoji ? `${r.emoji} ` : ""}${r.nombre}`}
+              {r.actividad && <span className="actividad" title={r.actividad}>{r.actividad.split(" ").pop()}</span>}
               {r.lider && <span className="corona" aria-label="líder">★</span>}
             </div>
           </div>
@@ -135,7 +139,7 @@ function Proyector({ plano, mundo, anclas }: { plano: Plano; mundo: Mundo; ancla
       } else {
         const sala = plano.salas.find((x) => x.slug === slug);
         if (!sala) continue;
-        v.set(sala.c0 + sala.w / 2, 1.3, sala.r0 - 0.5);
+        v.set(sala.c0 + sala.w / 2, 3.1, sala.r0 - 0.5);
       }
       const dist = camera.position.distanceTo(v);
       v.project(camera);
@@ -167,6 +171,7 @@ function Contenido({ plano, mundo, robots, puestosEncendidos, onSeleccionar, enf
           {s.puestos.map((p, i) => (
             <Escritorio key={i} puesto={p} encendido={puestosEncendidos.has(p)} nucleo={s.tipo === "nucleo"} />
           ))}
+          <Mobiliario sala={s} />
           {s.holo && <MesaHolografica sala={s} />}
           {s.holo && (
             <Sparkles count={alta ? 60 : 25} scale={[5, 2.5, 5]} size={2.5} speed={0.35} color="#7fe3ff" position={[s.holo.c + 1, 1.5, s.holo.r + 1]} />
@@ -201,8 +206,8 @@ function Camara({ plano, centro, mundo, enfocar, ajustarClave }: { plano: Plano;
     const mediaV = THREE.MathUtils.degToRad(persp.fov / 2);
     const ancho = plano.cols * 1.12;
     const fondo = plano.rows * 1.15;
-    const d = Math.max(ancho / 2 / (Math.tan(mediaV) * aspecto), fondo / 2 / Math.tan(mediaV)) * 1.18; // un poco de ciudad alrededor
-    const dir = new THREE.Vector3(0, 1.0, 0.62).normalize();
+    const d = Math.max(ancho / 2 / (Math.tan(mediaV) * aspecto), fondo / 2 / Math.tan(mediaV)) * 1.02;
+    const dir = new THREE.Vector3(0, 0.82, 0.86).normalize(); // más horizonte: se ven las torres del fondo
     camera.position.copy(centro).addScaledVector(dir, d);
     controles.current?.target.copy(centro);
     controles.current?.update();
@@ -237,7 +242,7 @@ function Camara({ plano, centro, mundo, enfocar, ajustarClave }: { plano: Plano;
       dampingFactor={0.12}
       maxPolarAngle={1.2}
       minDistance={4}
-      maxDistance={125}
+      maxDistance={100}
       onStart={() => (siguiendo.current = null)}
     />
   );
@@ -339,6 +344,23 @@ function Escritorio({ puesto, encendido, nucleo }: { puesto: Puesto; encendido: 
           <meshStandardMaterial color="#121b25" metalness={0.8} roughness={0.4} />
         </mesh>
       ))}
+      {/* teclado, taza y lámpara */}
+      <mesh position={[x, 0.8, z + 0.2]}>
+        <boxGeometry args={[0.7, 0.03, 0.22]} />
+        <meshStandardMaterial color="#0e161f" emissive={acento} emissiveIntensity={encendido ? 0.5 : 0.08} />
+      </mesh>
+      <mesh position={[x + 0.85, 0.85, z + 0.15]}>
+        <cylinderGeometry args={[0.06, 0.05, 0.13, 12]} />
+        <meshStandardMaterial color="#e9eef2" />
+      </mesh>
+      <mesh position={[x - 1.0, 0.95, z - 0.3]}>
+        <cylinderGeometry args={[0.02, 0.02, 0.35, 6]} />
+        <meshStandardMaterial color="#5a6670" metalness={0.8} />
+      </mesh>
+      <mesh position={[x - 1.0, 1.13, z - 0.22]}>
+        <sphereGeometry args={[0.07, 10, 8]} />
+        <meshStandardMaterial color="#fff6e0" emissive="#ffd28a" emissiveIntensity={encendido ? 2 : 0.3} />
+      </mesh>
       {/* monitor */}
       <mesh position={[x, 1.2, z - 0.35]}>
         <boxGeometry args={[1.25, 0.72, 0.05]} />

@@ -90,6 +90,9 @@ async function abrir(viewport) {
   ok("JARVIS lleva el encargo al líder de la sala", vistos.has("encargo"));
   ok("El trabajador reporta a su líder al terminar", vistos.has("reporte"));
   ok("Los agentes libres dicen frases de su personalidad", vistos.has("frase"));
+  let descansando = 0;
+  for (let i = 0; i < 40 && !descansando; i++) { descansando = (await p.$$(".oficina-capa .actividad")).length; if (!descansando) await p.waitForTimeout(500); }
+  ok("Los agentes libres se van a la zona de descanso", descansando > 0, `${descansando} descansando`);
   ok("Sin errores de JavaScript en PC", errores.length === 0, errores.slice(0, 3).join(" | "));
   await p.screenshot({ path: process.env.CAPTURA_PC ?? "/tmp/oficina-pc.png" });
   await p.close();

@@ -59,12 +59,27 @@ interface Edificio {
   tono: number;
 }
 
+/** Torres emblemáticas (diseños originales): detrás de la oficina para que se vean desde la cámara inicial. */
+function posicionesTorres(plano: Plano) {
+  const cx = plano.cols / 2;
+  const cz = plano.rows / 2;
+  const fondo = cz - plano.rows / 2 - 30;
+  return {
+    vanguardia: { x: cx, z: fondo - 8 },
+    aguja: { x: cx - plano.cols / 2 - 14, z: fondo + 6 },
+    anillo: { x: cx + plano.cols / 2 + 14, z: fondo + 4 },
+    gemelas: { x: cx + plano.cols / 4 + 6, z: fondo - 26 },
+    cupula: { x: cx - plano.cols / 4 - 6, z: fondo - 24 },
+  };
+}
+
 function generarEdificios(plano: Plano, cantidadMax: number): Edificio[] {
   const r = azar(20261021);
   const cx = plano.cols / 2;
   const cz = plano.rows / 2;
   const libreX = plano.cols / 2 + 9; // plaza libre alrededor de la oficina
   const libreZ = plano.rows / 2 + 9;
+  const torres = Object.values(posicionesTorres(plano));
   const out: Edificio[] = [];
   const paso = 7; // manzana + calle
   for (let gx = -15; gx <= 15; gx++) {
@@ -72,11 +87,13 @@ function generarEdificios(plano: Plano, cantidadMax: number): Edificio[] {
       const x = cx + gx * paso + (r() - 0.5) * 1.5;
       const z = cz + gz * paso + (r() - 0.5) * 1.5;
       if (Math.abs(x - cx) < libreX && Math.abs(z - cz) < libreZ) continue;
+      if (torres.some((t) => Math.hypot(x - t.x, z - t.z) < 11)) continue; // espacio para las torres emblemáticas
       const dist = Math.hypot(x - cx, z - cz);
-      if (dist > 105 || r() < 0.12) continue;
+      if (dist > 115 || r() < 0.12) continue;
       // Bajos cerca de la oficina (no tapan la vista) y más altos hacia afuera, formando el horizonte
       const borde = Math.max(Math.abs(x - cx) - libreX, Math.abs(z - cz) - libreZ, 0);
-      const h = borde < 14 ? 1.5 + r() * 4 : borde < 30 ? 5 + r() * 14 : 14 + r() * 30 + (r() < 0.08 ? 28 : 0);
+      // la cámara llega hasta ~100: lo alto queda más allá para no meterse entre edificios
+      const h = borde < 16 ? 1.5 + r() * 4 : borde < 40 ? 4 + r() * 10 : 14 + r() * 28;
       out.push({ x, z, w: 2.6 + r() * 2.6, d: 2.6 + r() * 2.6, h, tono: r() });
     }
   }
@@ -99,6 +116,7 @@ export function Ciudad({ plano, alta }: { plano: Plano; alta: boolean }) {
       <Balizas edificios={edificios} />
       <Vehiculos cx={cx} cz={cz} cantidad={alta ? 26 : 12} />
       <Anuncios cx={cx} cz={cz} plano={plano} />
+      <TorresEmblematicas plano={plano} />
     </group>
   );
 }
@@ -363,6 +381,229 @@ function Anuncios({ cx, cz, plano }: { cx: number; cz: number; plano: Plano }) {
       </mesh>
       <mesh material={mat} position={[cx, 26, cz - lejos - 14]} raycast={sinClic}>
         <planeGeometry args={[22, 7]} />
+      </mesh>
+    </group>
+  );
+}
+
+/* ─────────────── Torres emblemáticas (originales, sin logos ni marcas) ─────────────── */
+
+const metal = { color: "#1b2733", metalness: 0.9, roughness: 0.25 } as const;
+const cristal = { color: "#1f4d66", metalness: 0.6, roughness: 0.1, transparent: true, opacity: 0.85 } as const;
+
+function Luz({ color = "#7fe3ff", intensidad = 2.2 }: { color?: string; intensidad?: number }) {
+  return <meshStandardMaterial color={color} emissive={color} emissiveIntensity={intensidad} toneMapped={false} />;
+}
+
+function TorresEmblematicas({ plano }: { plano: Plano }) {
+  const t = useMemo(() => posicionesTorres(plano), [plano]);
+  return (
+    <group position={[0, SUELO_Y, 0]}>
+      <Vanguardia x={t.vanguardia.x} z={t.vanguardia.z} />
+      <Aguja x={t.aguja.x} z={t.aguja.z} />
+      <TorreAnillo x={t.anillo.x} z={t.anillo.z} />
+      <Gemelas x={t.gemelas.x} z={t.gemelas.z} />
+      <Cupula x={t.cupula.x} z={t.cupula.z} />
+    </group>
+  );
+}
+
+/** Cuartel general: torre escalonada con aletas de luz, plataforma de aterrizaje y corona giratoria. */
+function Vanguardia({ x, z }: { x: number; z: number }) {
+  const corona = useRef<THREE.Group>(null);
+  const faros = useRef<THREE.Group>(null);
+  useFrame(({ clock }) => {
+    if (corona.current) corona.current.rotation.y = clock.elapsedTime * 0.3;
+    if (faros.current) faros.current.rotation.y = clock.elapsedTime * 0.25;
+  });
+  const tramos: [number, number, number][] = [[12, 30, 10], [9, 26, 8], [6.5, 18, 6]];
+  let y = 0;
+  return (
+    <group position={[x, 0, z]}>
+      {tramos.map(([w, h, d], i) => {
+        const base = y;
+        y += h;
+        return (
+          <group key={i}>
+            <mesh position={[0, base + h / 2, 0]} raycast={sinClic}>
+              <boxGeometry args={[w, h, d]} />
+              <meshStandardMaterial {...cristal} />
+            </mesh>
+            {[-1, 1].map((k) => (
+              <mesh key={k} position={[k * (w / 2 + 0.05), base + h / 2, 0]} raycast={sinClic}>
+                <boxGeometry args={[0.15, h * 0.96, 0.6]} />
+                <Luz />
+              </mesh>
+            ))}
+            <mesh position={[0, base + h, 0]} raycast={sinClic}>
+              <boxGeometry args={[w + 0.6, 0.5, d + 0.6]} />
+              <meshStandardMaterial {...metal} />
+            </mesh>
+          </group>
+        );
+      })}
+      {/* plataforma de aterrizaje en voladizo */}
+      <mesh position={[7, 46, 0]} raycast={sinClic}>
+        <cylinderGeometry args={[3.2, 3.2, 0.4, 32]} />
+        <meshStandardMaterial {...metal} />
+      </mesh>
+      <mesh position={[7, 46.21, 0]} rotation-x={-Math.PI / 2} raycast={sinClic}>
+        <ringGeometry args={[2.2, 2.5, 32]} />
+        <Luz color="#e8b04b" />
+      </mesh>
+      {/* corona */}
+      <group ref={corona} position={[0, y + 4, 0]}>
+        <mesh rotation-x={Math.PI / 2} raycast={sinClic}>
+          <torusGeometry args={[4.2, 0.18, 10, 64]} />
+          <Luz color="#e8b04b" intensidad={2.6} />
+        </mesh>
+        <mesh rotation-x={Math.PI / 2.4} raycast={sinClic}>
+          <torusGeometry args={[3.2, 0.12, 10, 64]} />
+          <Luz />
+        </mesh>
+      </group>
+      <mesh position={[0, y + 6, 0]} raycast={sinClic}>
+        <coneGeometry args={[0.5, 12, 8]} />
+        <meshStandardMaterial {...metal} />
+      </mesh>
+      <mesh position={[0, y + 12.3, 0]} raycast={sinClic}>
+        <sphereGeometry args={[0.5, 12, 12]} />
+        <Luz color="#ff4d3d" intensidad={3} />
+      </mesh>
+      {/* faros que barren el cielo */}
+      <group ref={faros} position={[0, y + 1, 0]}>
+        {[0, Math.PI].map((a) => (
+          <mesh key={a} rotation={[0.55, a, 0]} position={[Math.sin(a) * 2, 18, Math.cos(a) * 2]} raycast={sinClic}>
+            <coneGeometry args={[4, 40, 24, 1, true]} />
+            <meshBasicMaterial color="#9fe9ff" transparent opacity={0.07} depthWrite={false} side={THREE.DoubleSide} />
+          </mesh>
+        ))}
+      </group>
+    </group>
+  );
+}
+
+/** Aguja retorcida: losas giradas una sobre otra con una antena luminosa. */
+function Aguja({ x, z }: { x: number; z: number }) {
+  const pisos = 26;
+  return (
+    <group position={[x, 0, z]}>
+      {Array.from({ length: pisos }, (_, i) => {
+        const esc = 1 - i / (pisos * 1.6);
+        return (
+          <group key={i} position={[0, i * 2.4 + 1.2, 0]} rotation-y={(i * Math.PI) / 36}>
+            <mesh raycast={sinClic}>
+              <boxGeometry args={[7 * esc, 2.2, 7 * esc]} />
+              <meshStandardMaterial {...cristal} color={i % 2 ? "#1d4a63" : "#183c52"} />
+            </mesh>
+            <mesh position={[0, 1.12, 0]} raycast={sinClic}>
+              <boxGeometry args={[7 * esc + 0.1, 0.08, 7 * esc + 0.1]} />
+              <Luz color={i % 6 === 0 ? "#e8b04b" : "#36c9ff"} intensidad={1.8} />
+            </mesh>
+          </group>
+        );
+      })}
+      <mesh position={[0, pisos * 2.4 + 6, 0]} raycast={sinClic}>
+        <cylinderGeometry args={[0.08, 0.4, 12, 8]} />
+        <Luz />
+      </mesh>
+    </group>
+  );
+}
+
+/** Torre cilíndrica con dos grandes anillos de energía girando en la parte alta. */
+function TorreAnillo({ x, z }: { x: number; z: number }) {
+  const anillos = useRef<THREE.Group>(null);
+  useFrame(({ clock }) => {
+    anillos.current?.children.forEach((c, i) => (c.rotation.z = clock.elapsedTime * (i ? -0.4 : 0.3)));
+  });
+  return (
+    <group position={[x, 0, z]}>
+      <mesh position={[0, 27, 0]} raycast={sinClic}>
+        <cylinderGeometry args={[3.2, 4.2, 54, 32]} />
+        <meshStandardMaterial {...cristal} />
+      </mesh>
+      {[10, 20, 30, 40, 50].map((h) => (
+        <mesh key={h} position={[0, h, 0]} raycast={sinClic}>
+          <cylinderGeometry args={[4.25 - h / 54, 4.25 - h / 54, 0.25, 32]} />
+          <Luz intensidad={1.4} />
+        </mesh>
+      ))}
+      <group ref={anillos} position={[0, 46, 0]}>
+        <mesh rotation-x={Math.PI / 2.2} raycast={sinClic}>
+          <torusGeometry args={[7, 0.35, 12, 72]} />
+          <Luz color="#36c9ff" intensidad={2.4} />
+        </mesh>
+        <mesh rotation-x={Math.PI / 1.8} raycast={sinClic}>
+          <torusGeometry args={[5.6, 0.25, 12, 72]} />
+          <Luz color="#e8b04b" intensidad={2.4} />
+        </mesh>
+      </group>
+      <mesh position={[0, 56, 0]} raycast={sinClic}>
+        <sphereGeometry args={[2, 24, 16]} />
+        <meshStandardMaterial color="#dff8ff" emissive="#7fe3ff" emissiveIntensity={1.6} transparent opacity={0.8} />
+      </mesh>
+    </group>
+  );
+}
+
+/** Dos torres unidas por un puente aéreo iluminado. */
+function Gemelas({ x, z }: { x: number; z: number }) {
+  return (
+    <group position={[x, 0, z]}>
+      {[-5, 5].map((dx) => (
+        <group key={dx} position={[dx, 0, 0]}>
+          <mesh position={[0, 24, 0]} raycast={sinClic}>
+            <boxGeometry args={[5, 48, 5]} />
+            <meshStandardMaterial {...cristal} color="#173a50" />
+          </mesh>
+          {[0, 1, 2, 3].map((k) => (
+            <mesh key={k} position={[(k % 2 ? 1 : -1) * 2.55, 24, (k > 1 ? 1 : -1) * 2.55]} raycast={sinClic}>
+              <boxGeometry args={[0.12, 48, 0.12]} />
+              <Luz color="#e8b04b" intensidad={1.6} />
+            </mesh>
+          ))}
+          <mesh position={[0, 50, 0]} raycast={sinClic}>
+            <coneGeometry args={[2.6, 4, 4]} />
+            <meshStandardMaterial {...metal} />
+          </mesh>
+        </group>
+      ))}
+      <mesh position={[0, 32, 0]} raycast={sinClic}>
+        <boxGeometry args={[5, 1.6, 2.4]} />
+        <meshStandardMaterial {...cristal} color="#2a6f8f" />
+      </mesh>
+      <mesh position={[0, 31.1, 0]} raycast={sinClic}>
+        <boxGeometry args={[5.2, 0.12, 2.5]} />
+        <Luz />
+      </mesh>
+    </group>
+  );
+}
+
+/** Observatorio: torre delgada rematada con una cúpula de cristal y un telescopio de luz. */
+function Cupula({ x, z }: { x: number; z: number }) {
+  const ref = useRef<THREE.Mesh>(null);
+  useFrame(({ clock }) => {
+    if (ref.current) ref.current.rotation.y = clock.elapsedTime * 0.2;
+  });
+  return (
+    <group position={[x, 0, z]}>
+      <mesh position={[0, 20, 0]} raycast={sinClic}>
+        <cylinderGeometry args={[2.2, 3.4, 40, 24]} />
+        <meshStandardMaterial {...cristal} color="#183c52" />
+      </mesh>
+      <mesh position={[0, 40.5, 0]} raycast={sinClic}>
+        <cylinderGeometry args={[5, 5, 1, 32]} />
+        <meshStandardMaterial {...metal} />
+      </mesh>
+      <mesh position={[0, 41, 0]} raycast={sinClic}>
+        <sphereGeometry args={[4.6, 32, 16, 0, Math.PI * 2, 0, Math.PI / 2]} />
+        <meshStandardMaterial color="#9fe9ff" transparent opacity={0.35} emissive="#2bb8ff" emissiveIntensity={0.5} />
+      </mesh>
+      <mesh ref={ref} position={[0, 43, 0]} raycast={sinClic}>
+        <cylinderGeometry args={[0.5, 0.8, 5, 12]} />
+        <Luz color="#e8b04b" intensidad={1.6} />
       </mesh>
     </group>
   );

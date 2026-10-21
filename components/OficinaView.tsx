@@ -242,7 +242,7 @@ export function OficinaView({ s }: { s: JarvisState }) {
       const nota = notas.current.get(a.slug);
       const viva = nota && nota.hasta > Date.now() ? nota : undefined;
       const sel = seleccion === a.slug;
-      const texto = viva?.texto ?? (trabajando(a) ? run?.current_step || "Trabajando…" : sel ? a.last_summary || "Libre" : null);
+      const texto = viva?.texto ?? (trabajando(a) ? run?.current_step || "Trabajando…" : sel ? mundo.actividad(a.slug) ?? a.last_summary ?? "Libre" : null);
       const esLider = !!asignacion.get(a.slug)?.lider;
       return {
         slug: a.slug,
@@ -251,6 +251,7 @@ export function OficinaView({ s }: { s: JarvisState }) {
         lider: esLider,
         esJarvis: a.slug === "jarvis",
         trabajando: trabajando(a),
+        actividad: mundo.actividad(a.slug),
         armadura: esLider ? 0 : 1 + (a.position % 5),
         globo: texto ? { texto: texto.length > 70 && !sel ? `${texto.slice(0, 67)}…` : texto, tipo: viva?.tipo ?? "trabajo" } : null,
         seleccionado: sel,
@@ -351,6 +352,7 @@ export function OficinaView({ s }: { s: JarvisState }) {
           lider={!!asignacion.get(agenteSel.slug)?.lider}
           equipo={equipoSel.map((x) => ({ slug: x.slug, nombre: x.name, emoji: x.emoji ?? "", trabajando: trabajando(x), paso: ultimoRun.get(x.id)?.current_step ?? null }))}
           runs={s.runs.filter((r) => r.agent_id === agenteSel.id)}
+          actividad={mundo.actividad(agenteSel.slug)}
           onClose={() => setSeleccion(null)}
           onElegir={setSeleccion}
         />
@@ -370,8 +372,8 @@ interface Miembro {
   paso: string | null;
 }
 
-function PanelAgente({ a, sala, lider, equipo, runs, onClose, onElegir }: {
-  a: AgentRow; sala?: string; lider: boolean; equipo: Miembro[]; runs: AgentRun[]; onClose: () => void; onElegir: (slug: string) => void;
+function PanelAgente({ a, sala, lider, equipo, runs, actividad, onClose, onElegir }: {
+  a: AgentRow; sala?: string; lider: boolean; equipo: Miembro[]; runs: AgentRun[]; actividad: string | null; onClose: () => void; onElegir: (slug: string) => void;
 }) {
   const actual = runs.find(enCurso);
   const costo = runs.reduce((t, r) => t + (Number(r.cost_usd) || 0), 0);
@@ -405,7 +407,7 @@ function PanelAgente({ a, sala, lider, equipo, runs, onClose, onElegir }: {
         <p className="muted small">Coordina a su equipo y firma los avisos de Telegram del proyecto. No gasta tokens.</p>
       )}
       <p>
-        <span className={`estado-punto ${actual ? "working" : a.status}`} /> {actual || a.status === "working" ? "Trabajando" : a.status === "error" ? "Con error" : "Libre"}
+        <span className={`estado-punto ${actual ? "working" : a.status}`} /> {actual || a.status === "working" ? "Trabajando" : a.status === "error" ? "Con error" : actividad ?? "Libre"}
         {actual?.current_step && <> — <i>{actual.current_step}</i></>}
       </p>
       {a.last_summary && (
