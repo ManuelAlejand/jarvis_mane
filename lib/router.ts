@@ -65,6 +65,7 @@ const HELP = [
   "/videos — Shorts en el estudio y su estado",
   "/reintentar V1 — relanzar un Short que falló",
   "/agente investigador busca nichos de misterio — darle una orden",
+  "/agente radar explora nichos y locales para la Auditoría GEO en Bogotá — Radar (en tu PC, 0 USD)",
   "",
   "También entiendo: <i>pendientes</i>, <i>cómo va todo</i>, <i>cómo va youtube</i>, <i>gasto</i>.",
   "Y texto libre: <i>recuérdame comprar el dominio, es urgente</i> 🧠",

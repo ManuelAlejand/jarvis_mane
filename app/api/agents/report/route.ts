@@ -24,6 +24,8 @@ interface Report {
   output?: string;
   verdict?: "APROBADO" | "RECHAZADO";
   cost_usd?: number;
+  /** Resultado estructurado (p. ej. resultado.json del Radar) */
+  result?: unknown;
 }
 
 export async function POST(req: NextRequest) {
@@ -64,6 +66,7 @@ export async function POST(req: NextRequest) {
       ...(r.output !== undefined ? { output: r.output } : {}),
       ...(r.verdict ? { verdict: r.verdict } : {}),
       ...(r.cost_usd !== undefined ? { cost_usd: r.cost_usd } : {}),
+      ...(r.result !== undefined && r.result !== null ? { result: r.result } : {}),
       ...(status === "error" ? { error: r.summary ?? r.step ?? "Error reportado" } : {}),
       ...(!run.started_at ? { started_at: now } : {}),
       ...(final ? { finished_at: now } : {}),

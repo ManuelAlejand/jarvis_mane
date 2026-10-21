@@ -5,6 +5,7 @@ Pide trabajo a JARVIS cada pocos segundos y lo ejecuta aquí:
              → Validador (Claude Code) con hasta 2 rondas de corrección
              → te envía el Short por Telegram con los botones Publicar / Cambiar / Descartar
   publicar → Publicador: sube el Short a YouTube en privado, con divulgación de IA
+  radar    → Radar: investiga nichos y locales con la skill radar-nichos (Claude Code, plan Pro)
 
 Uso (desde la carpeta del estudio):  python puente.py          # se queda escuchando
                                      python puente.py --una-vez  # procesa un trabajo y sale
@@ -134,6 +135,10 @@ HERRAMIENTAS = ",".join([
 def claude(instrucciones: str, video: dict, agente: str, paso: str, timeout: int = 1500) -> str:
     """Ejecuta Claude Code sin interfaz, con tu sesión Pro, en la carpeta del estudio."""
     reportar(video["id"], agente=agente, paso=paso, fase_detalle=paso)
+    return claude_cli(instrucciones, agente, paso, timeout)
+
+
+def claude_cli(instrucciones: str, agente: str, paso: str, timeout: int = 1500) -> str:
     log(f"  → Claude Code ({agente}): {paso}")
     args = comando_claude() + [
         "-p", "Sigue exactamente las instrucciones recibidas por la entrada estandar.",
@@ -576,6 +581,80 @@ def flujo_publicar(video: dict) -> None:
                         f"Revísalo y hazlo público desde YouTube Studio:\n{data.get('studio') or data['url']}"))
 
 
+# ----------------------------------------------------------------------------- Radar (nichos y locales)
+
+RADAR_TIMEOUT = int(os.environ.get("RADAR_TIMEOUT_SEG", "2700"))  # 45 min
+
+
+def reportar_run(run_id: str, **campos) -> None:
+    try:
+        api("POST", "/api/agents/report", json={"run_id": run_id, **campos})
+    except Exception as e:  # noqa: BLE001
+        log(f"  (no se pudo reportar la orden a JARVIS: {e})")
+
+
+def instrucciones_radar(orden: str, carpeta: Path) -> str:
+    return f"""Usa la skill `radar-nichos`: lee `.claude/skills/radar-nichos/SKILL.md` y síguela al pie de la letra.
+
+Orden de Manuel (vía JARVIS):
+{orden}
+
+Carpeta de salida (ya existe; escribe AQUÍ, no crees otra): {carpeta}
+Debes dejar `informe.md` y `resultado.json` (forma exacta de la skill) en esa carpeta.
+Si la orden trata de la Auditoría GEO, la oferta es: diagnóstico de si un negocio local aparece en ChatGPT/Gemini/Perplexity
++ mensualidad para mejorar su perfil de Google, reseñas, FAQ y directorios (COP 250-600 mil/mes; auditoría COP 200-400 mil).
+Al terminar responde solo con la línea `Resumen: …`."""
+
+
+def flujo_radar(run: dict) -> None:
+    orden = (run.get("input") or "").strip()
+    carpeta = RAIZ / "radar" / f"{datetime.now():%Y-%m-%d}-{slug(orden)}"
+    carpeta.mkdir(parents=True, exist_ok=True)
+    log(f"Radar: «{orden[:80]}» → {carpeta.name}")
+    reportar_run(run["id"], status="running", step="Leyendo la skill y preparando la búsqueda")
+    inicio = time.time()
+    listo = threading.Event()
+
+    def latido() -> None:  # la Oficina lo muestra trabajando con el minuto en curso
+        while not listo.wait(60):
+            reportar_run(run["id"], status="running", step=f"Investigando en internet · {int((time.time() - inicio) // 60)} min")
+
+    hilo = threading.Thread(target=latido, daemon=True)
+    hilo.start()
+    try:
+        salida = claude_cli(instrucciones_radar(orden, carpeta), "radar", "Investigando nichos y locales", RADAR_TIMEOUT)
+    finally:
+        listo.set()
+    informe = carpeta / "informe.md"
+    datos = carpeta / "resultado.json"
+    resultado = None
+    if datos.exists():
+        try:
+            resultado = leer_json(datos)
+        except Exception as e:  # noqa: BLE001
+            log(f"  resultado.json no es válido: {e}")
+    m = re.search(r"^\s*Resumen:\s*(.+)$", salida, re.M)
+    resumen = ((resultado or {}).get("resumen") or (m.group(1) if m else "") or "Investigación lista").strip()[:140]
+    if not informe.exists() and not resultado:
+        raise Fallo("Claude Code terminó pero no dejó informe.md ni resultado.json")
+    texto = informe.read_text(encoding="utf-8") if informe.exists() else salida
+    n_nichos = len((resultado or {}).get("nichos") or [])
+    n_locales = len((resultado or {}).get("locales") or [])
+    reportar_run(run["id"], status="done", summary=resumen,
+                 output=f"{texto[:60000]}\n\n_Archivos en el PC: radar/{carpeta.name}/_", result=resultado,
+                 step=f"{n_nichos} nichos · {n_locales} locales")
+    log(f"Radar listo: {resumen}")
+
+
+def procesar_radar(run: dict) -> None:
+    try:
+        flujo_radar(run)
+    except Exception as e:  # noqa: BLE001
+        detalle = str(e) if isinstance(e, Fallo) else f"{type(e).__name__}: {e}"
+        log(f"ERROR Radar: {detalle}\n{traceback.format_exc()}")
+        reportar_run(run["id"], status="error", summary=detalle[:300])
+
+
 # ----------------------------------------------------------------------------- bucle
 
 def procesar(trabajo: dict) -> None:
@@ -649,6 +728,10 @@ def main() -> None:
             if t:
                 procesar(t)
                 continue  # puede haber más en cola
+            orden = api("GET", "/api/agents/next?agent=radar").get("run")
+            if orden:
+                procesar_radar(orden)
+                continue
             if una:
                 return
         except requests.RequestException as e:

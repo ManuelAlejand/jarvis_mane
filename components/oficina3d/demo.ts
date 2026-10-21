@@ -28,6 +28,7 @@ export function estadoDemo(paso: number): JarvisState {
     A("a5", "validador", "Validador", "Validador", 5, "local", { ...yt, ...f("🛡️", "Estricto.", ["Aprobado. Por ahora."]) }),
     A("a6", "publicador", "Publicador", "Publicador", 6, "local", { ...yt, ...f("🚀", "Entusiasta.", ["El botón público es tuyo, Manuel."]) }),
     A("a7", "friday", "F.R.I.D.A.Y.", "Líder del estudio de YouTube", 10, "chat", { ...yt, is_leader: true, ...f("🎬", "Directora del estudio: directa, rápida y orientada a resultados.", ["Equipo, el algoritmo no espera."]) }),
+    A("a9", "radar", "Radar", "Explorador de nichos y locales", 7, "local", { project_id: "p2", ...f("📡", "Explorador de mercado: metódico y escéptico.", ["Sin fuente no hay dato."]) }),
     A("a8", "edith", "E.D.I.T.H.", "Líder de la Auditoría GEO", 11, "chat", { project_id: "p2", is_leader: true, ...f("📍", "Analítica y estratégica.", ["Primero medir, luego vender."]) }),
   ];
   const ahora = Date.now();
@@ -43,6 +44,7 @@ export function estadoDemo(paso: number): JarvisState {
   if (k >= 1) run("r1", "a2", k >= 3 ? "done" : "running", "Investigando nichos de misterio");
   if (k >= 4) run("r2", "a3", k >= 6 ? "done" : "running", "Escribiendo el guion de V5", { parent_run_id: `r1-${Math.floor(paso / DEMO_PASOS)}`, video_id: "v5" });
   if (k >= 7) run("r3", "a4", k >= 10 ? (k >= 12 ? "done" : "error") : "running", "Generando voz 4/15", { video_id: "v5" });
+  if (k >= 2) run("r5", "a9", k >= 9 ? "done" : "running", k < 5 ? "Leyendo la skill y preparando la búsqueda" : "Investigando en internet · 3 min", { input: "Explora nichos y locales para la Auditoría GEO en Colombia", summary: k >= 9 ? "3 nichos prioritarios y 24 locales candidatos" : null });
   if (k >= 11) run("r4", "a5", k >= 13 ? "done" : "running", "Validando el video V5", { video_id: "v5" });
   const projects = [P("p0", "jarvis-core", "JARVIS Core", "activo"), P("p1", "youtube-shorts", "YouTube Shorts", "idea"), P("p2", "auditoria-geo", "Auditoría GEO", "activo")];
   return {

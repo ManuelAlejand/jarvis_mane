@@ -6,7 +6,7 @@
 import {
   Activity, Armchair, Bot, CircleCheck, CircleDashed, Clapperboard, Cloud, CloudFog, CloudLightning, CloudMoon, CloudRain,
   CloudSun, Coffee, Cpu, Droplet, Film, Footprints, Gamepad2, Joystick, Loader, Mail, Microscope, Moon, Music, OctagonAlert,
-  PenTool, Play, Rocket, Satellite, ShieldCheck, Sofa, Sun, Sunrise, Sunset, Telescope, TriangleAlert, type LucideIcon,
+  PenTool, Play, Radar, Rocket, Satellite, ShieldCheck, Sofa, Sun, Sunrise, Sunset, Telescope, TriangleAlert, type LucideIcon,
 } from "lucide-react";
 import type { Ambiente } from "@/lib/oficina/ambiente";
 import type { TipoDescanso } from "@/lib/oficina/plano";
@@ -21,10 +21,12 @@ const POR_AGENTE: Record<string, LucideIcon> = {
   publicador: Rocket,
   friday: Film,
   edith: Satellite,
+  radar: Radar,
 };
 
 /** Si el agente es nuevo, se elige por palabras de su rol. */
 const POR_ROL: [RegExp, LucideIcon][] = [
+  [/local|prospect|mercado/i, Radar],
   [/tendenc|explor/i, Telescope],
   [/investig|nicho|anális|analis/i, Microscope],
   [/guion|redact|escrib/i, PenTool],
