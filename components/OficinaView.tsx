@@ -1,26 +1,17 @@
 "use client";
 /**
- * Oficina de JARVIS: los agentes como personajes que trabajan en salas por proyecto.
- * Motor: Pixel Agents (MIT, vendor/pixel-agents). Datos: los mismos de useJarvis (Supabase Realtime).
- * No gasta tokens: solo dibuja lo que ya pasa en la base de datos.
+ * Oficina 3D de JARVIS: los agentes son robots con armadura que trabajan en salas por proyecto.
+ * Datos: los mismos de useJarvis (Supabase Realtime). No gasta tokens: solo dibuja lo que ya pasa.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { JarvisState } from "@/components/useJarvis";
 import type { AgentRow, AgentRun, Project } from "@/lib/types";
-import { cargarAssetsOficina } from "@/lib/oficina/assets";
-import { generarPlano, type Plano, type SalaPlano, type SalaSpec } from "@/lib/oficina/layout";
-import { OfficeCanvas } from "@/vendor/pixel-agents/webview-ui/src/office/components/OfficeCanvas";
-import { EditorState } from "@/vendor/pixel-agents/webview-ui/src/office/editor/editorState";
-import { OfficeState } from "@/vendor/pixel-agents/webview-ui/src/office/engine/officeState";
-import { overlayProjection } from "@/vendor/pixel-agents/webview-ui/src/office/projection";
-import { setProviderCapabilities } from "@/vendor/pixel-agents/webview-ui/src/office/toolUtils";
-import { CharacterState, TILE_SIZE } from "@/vendor/pixel-agents/webview-ui/src/office/types";
-
-setProviderCapabilities({ readingTools: ["leer"], subagentToolNames: [] });
+import { generarPlano, type Puesto, type Sala, type SalaSpec } from "@/lib/oficina/plano";
+import { Mundo } from "@/lib/oficina/mundo";
+import { Escena, type InfoRobot, type InfoSala } from "@/components/oficina3d/Escena";
 
 const ESTUDIO = new Set(["explorador", "investigador", "guionista", "productor", "validador", "publicador"]);
-const LECTURA = /(investig|busc|revis|valid|analiz|leyend|explor|tendenc|verific|calific)/i;
-const NOTA_SEG = 25; // segundos que se ve "listo" o "error" sobre la cabeza
+const NOTA_MS = 25000; // tiempo que se ve "listo" o "error" sobre la cabeza
 
 type Nota = { tipo: "ok" | "error"; texto: string; hasta: number };
 
@@ -33,17 +24,16 @@ function hash(s: string) {
 /** Salas: el Núcleo (JARVIS) + cada proyecto activo o con agentes asignados. */
 function salasDe(projects: Project[], agents: AgentRow[]): SalaSpec[] {
   const conAgentes = new Set(agents.map((a) => a.project_id).filter(Boolean));
-  const estudio = projects.find((p) => p.slug === "youtube-shorts");
   const out: SalaSpec[] = [{ slug: "nucleo", nombre: "Núcleo JARVIS", tipo: "nucleo", tono: 195 }];
   const lista = projects
-    .filter((p) => p.slug !== "jarvis-core" && (p.status === "activo" || conAgentes.has(p.id) || p.id === estudio?.id))
+    .filter((p) => p.slug !== "jarvis-core" && (p.status === "activo" || conAgentes.has(p.id) || p.slug === "youtube-shorts"))
     .sort((a, b) => (a.status === "activo" ? 0 : 1) - (b.status === "activo" ? 0 : 1));
   for (const p of lista) out.push({ slug: p.slug, nombre: p.name, tipo: "proyecto", tono: hash(p.slug) % 360 });
   return out;
 }
 
-/** Sala de cada agente: la de su proyecto; el estudio de YouTube por defecto para sus agentes; si no, el Núcleo. */
-function salaDeAgente(a: AgentRow, projects: Project[], salas: SalaPlano[]): SalaPlano {
+/** Sala de cada agente: la de su proyecto; los agentes del estudio van a YouTube; si no, el Núcleo. */
+function salaDeAgente(a: AgentRow, projects: Project[], salas: Sala[]): Sala {
   const porSlug = (slug: string) => salas.find((s) => s.slug === slug);
   const proyecto = a.project_id ? projects.find((p) => p.id === a.project_id) : undefined;
   return (proyecto && porSlug(proyecto.slug)) || (ESTUDIO.has(a.slug) && porSlug("youtube-shorts")) || salas[0];
@@ -58,110 +48,59 @@ function ago(iso: string | null) {
   return `hace ${Math.round(s / 86400)} d`;
 }
 
-export function OficinaView({ s }: { s: JarvisState }) {
-  const [listo, setListo] = useState(false);
-  const [fallo, setFallo] = useState<string | null>(null);
-  const [zoom, setZoom] = useState(3);
-  const [seleccion, setSeleccion] = useState<string | null>(null); // slug del agente
-  const [, setTick] = useState(0);
-  const panRef = useRef({ x: 0, y: 0 });
-  const contRef = useRef<HTMLDivElement>(null);
-  const osRef = useRef<OfficeState | null>(null);
-  const editor = useMemo(() => new EditorState(), []);
-  const idsRef = useRef(new Map<string, number>()); // slug → id de personaje
-  const notasRef = useRef(new Map<string, Nota>());
-  const runsVistos = useRef<Map<string, AgentRun["status"]> | null>(null);
-  const planoRef = useRef<Plano | null>(null);
-  const firmaRef = useRef("");
+const enCurso = (r?: AgentRun) => r?.status === "running" || r?.status === "queued";
 
-  // 1) Sprites del motor (una vez)
-  useEffect(() => {
-    cargarAssetsOficina().then(() => setListo(true)).catch((e) => setFallo(e instanceof Error ? e.message : String(e)));
-  }, []);
+export function OficinaView({ s }: { s: JarvisState }) {
+  const [seleccion, setSeleccion] = useState<string | null>(null);
+  const [ajustar, setAjustar] = useState(0);
+  const [, setReloj] = useState(0);
+  const notas = useRef(new Map<string, Nota>());
+  const runsVistos = useRef<Map<string, AgentRun["status"]> | null>(null);
 
   const specs = useMemo(() => salasDe(s.projects, s.agents), [s.projects, s.agents]);
-  const plano = useMemo(() => generarPlano(specs), [specs]);
+  const firma = specs.map((x) => `${x.slug}:${x.nombre}`).join("|");
+  // El plano solo se regenera si cambian las salas (no en cada actualización de datos)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const plano = useMemo(() => generarPlano(specs), [firma]);
+  const mundo = useMemo(() => new Mundo(plano), [plano]);
 
-  const agentesActivos = useMemo(() => s.agents.filter((a) => a.enabled), [s.agents]);
-  const porSlug = useMemo(() => new Map(s.agents.map((a) => [a.slug, a])), [s.agents]);
+  const activos = useMemo(() => s.agents.filter((a) => a.enabled).sort((a, b) => a.position - b.position), [s.agents]);
   const porId = useMemo(() => new Map(s.agents.map((a) => [a.id, a])), [s.agents]);
+  const ultimoRun = useMemo(() => {
+    const m = new Map<string, AgentRun>();
+    for (const r of s.runs) if (!m.has(r.agent_id)) m.set(r.agent_id, r); // vienen del más nuevo al más viejo
+    return m;
+  }, [s.runs]);
 
-  const ajustarZoom = useCallback(() => {
-    const el = contRef.current;
-    if (!el || !planoRef.current) return;
-    const dpr = window.devicePixelRatio || 1;
-    const { cols, rows } = planoRef.current.layout;
-    const r = el.getBoundingClientRect();
-    const z = Math.floor(Math.min((r.width * dpr) / (cols * TILE_SIZE), (r.height * dpr) / (rows * TILE_SIZE)));
-    setZoom(Math.max(1, Math.min(10, z)));
-    panRef.current = { x: 0, y: 0 };
-  }, []);
+  // Puesto de cada agente: el primero de cada sala es el líder (primer escritorio)
+  const asignacion = useMemo(() => {
+    const usados = new Map<string, number>();
+    const out = new Map<string, { sala: Sala; puesto: Puesto; lider: boolean }>();
+    for (const a of activos) {
+      const sala = salaDeAgente(a, s.projects, plano.salas);
+      const n = usados.get(sala.slug) ?? 0;
+      if (n >= sala.puestos.length) continue; // sala llena
+      usados.set(sala.slug, n + 1);
+      out.set(a.slug, { sala, puesto: sala.puestos[n], lider: n === 0 });
+    }
+    return out;
+  }, [activos, s.projects, plano]);
 
-  // 2) Plano: se reconstruye solo si cambian las salas
+  const trabajando = useCallback((a: AgentRow) => a.status === "working" || enCurso(ultimoRun.get(a.id)), [ultimoRun]);
+
+  // Robots ← agentes (altas, bajas y si están trabajando)
   useEffect(() => {
-    if (!listo) return;
-    const firma = specs.map((x) => x.slug).join("|");
-    if (!osRef.current) osRef.current = new OfficeState(plano.layout);
-    else if (firma !== firmaRef.current) {
-      osRef.current.rebuildFromLayout(plano.layout);
-      for (const id of idsRef.current.values()) osRef.current.removeAgent(id);
-      idsRef.current.clear();
+    for (const slug of [...mundo.robots.keys()]) if (!asignacion.has(slug)) mundo.quitar(slug);
+    for (const a of activos) {
+      const as = asignacion.get(a.slug);
+      if (!as) continue;
+      mundo.colocar(a.slug, as.sala, as.puesto, trabajando(a));
+      mundo.setTrabajando(a.slug, trabajando(a));
     }
-    firmaRef.current = firma;
-    planoRef.current = plano;
-    ajustarZoom();
-  }, [listo, plano, specs, ajustarZoom]);
+  }, [mundo, activos, asignacion, trabajando]);
 
+  // Entregas y gestos: solo para ejecuciones nuevas o que cambiaron (no en la primera carga)
   useEffect(() => {
-    window.addEventListener("resize", ajustarZoom);
-    return () => window.removeEventListener("resize", ajustarZoom);
-  }, [ajustarZoom]);
-
-  // 3) Personajes ← agentes y ejecuciones (cada cambio en Supabase)
-  useEffect(() => {
-    const os = osRef.current;
-    const pl = planoRef.current;
-    if (!listo || !os || !pl) return;
-
-    // Altas y bajas
-    const vivos = new Set(agentesActivos.map((a) => a.slug));
-    for (const [slug, id] of idsRef.current) {
-      if (!vivos.has(slug)) {
-        os.removeAgent(id);
-        idsRef.current.delete(slug);
-      }
-    }
-    const ocupadas = new Map<string, number>(); // sala → sillas usadas
-    const ordenados = [...agentesActivos].sort((a, b) => a.position - b.position);
-    for (const a of ordenados) {
-      const sala = salaDeAgente(a, s.projects, pl.salas);
-      const n = ocupadas.get(sala.slug) ?? 0;
-      ocupadas.set(sala.slug, n + 1);
-      if (idsRef.current.has(a.slug)) continue;
-      const id = 1 + Math.max(0, ...idsRef.current.values());
-      idsRef.current.set(a.slug, id);
-      const silla = sala.sillas[n]; // líder = primera silla de la sala
-      const paleta = a.slug === "jarvis" ? 0 : a.position % 6;
-      os.addAgent(id, paleta, a.slug === "jarvis" ? 0 : (Math.floor(a.position / 6) * 47) % 360, silla, false, sala.slug);
-      const ch = os.characters.get(id);
-      if (ch) ch.agentName = a.name;
-    }
-
-    // Actividad
-    const ultimoRun = new Map<string, AgentRun>();
-    for (const r of s.runs) if (!ultimoRun.has(r.agent_id)) ultimoRun.set(r.agent_id, r); // runs vienen del más nuevo al más viejo
-    for (const a of agentesActivos) {
-      const id = idsRef.current.get(a.slug);
-      if (id === undefined) continue;
-      const run = ultimoRun.get(a.id);
-      const trabajando = a.status === "working" || run?.status === "running" || run?.status === "queued";
-      const paso = run?.current_step ?? a.last_summary ?? "";
-      os.setAgentTool(id, trabajando ? (LECTURA.test(paso) ? "leer" : "escribir") : null);
-      const ch = os.characters.get(id);
-      if (ch && ch.isActive !== trabajando) os.setAgentActive(id, trabajando);
-    }
-
-    // Entregas y avisos: solo para ejecuciones nuevas o que cambiaron (no en la primera carga)
     const vistos = runsVistos.current;
     const ahora = Date.now();
     if (vistos) {
@@ -169,203 +108,136 @@ export function OficinaView({ s }: { s: JarvisState }) {
         const antes = vistos.get(r.id);
         const agente = porId.get(r.agent_id);
         if (!agente) continue;
-        const idAgente = idsRef.current.get(agente.slug);
-        if (antes === undefined && (r.status === "queued" || r.status === "running")) {
-          // ¿Quién le entrega el trabajo? El agente de la ejecución anterior del mismo video/ejecución padre, o JARVIS
+        if (antes === undefined && enCurso(r)) {
+          // ¿Quién le entrega el trabajo? El agente de la ejecución padre o de la anterior del mismo video; si no, JARVIS
           const previa = r.parent_run_id
             ? s.runs.find((x) => x.id === r.parent_run_id)
             : r.video_id
               ? s.runs.find((x) => x.video_id === r.video_id && x.id !== r.id && x.created_at <= r.created_at)
               : undefined;
           const quien = previa ? porId.get(previa.agent_id)?.slug : "jarvis";
-          if (quien && quien !== agente.slug) entregar(quien, agente.slug);
+          if (quien && quien !== agente.slug) {
+            mundo.entregar(quien, agente.slug);
+            notas.current.set(quien, { tipo: "ok", texto: `Entregando a ${agente.name}…`, hasta: ahora + 9000 });
+          }
         }
-        if (antes !== undefined && antes !== r.status && idAgente !== undefined) {
+        if (antes !== undefined && antes !== r.status) {
           if (r.status === "done") {
-            os.showWaitingBubble(idAgente);
-            notasRef.current.set(agente.slug, { tipo: "ok", texto: r.summary ?? "Trabajo terminado", hasta: ahora + NOTA_SEG * 1000 });
+            mundo.gesto(agente.slug, "ThumbsUp", 2600);
+            notas.current.set(agente.slug, { tipo: "ok", texto: r.summary ?? "Trabajo terminado", hasta: ahora + NOTA_MS });
           } else if (r.status === "error") {
-            notasRef.current.set(agente.slug, { tipo: "error", texto: r.error ?? "Se detuvo", hasta: ahora + NOTA_SEG * 1000 });
+            mundo.gesto(agente.slug, "No", 2600);
+            notas.current.set(agente.slug, { tipo: "error", texto: r.error ?? "Se detuvo", hasta: ahora + NOTA_MS });
           }
         }
       }
     }
     runsVistos.current = new Map(s.runs.map((r) => [r.id, r.status]));
+  }, [s.runs, porId, mundo]);
 
-    function entregar(de: string, para: string) {
-      const idDe = idsRef.current.get(de);
-      const destino = porSlug.get(para);
-      if (idDe === undefined || !destino || !os || !pl) return;
-      const sala = salaDeAgente(destino, s.projects, pl.salas);
-      const idx = [...agentesActivos]
-        .sort((a, b) => a.position - b.position)
-        .filter((x) => salaDeAgente(x, s.projects, pl.salas).slug === sala.slug)
-        .findIndex((x) => x.slug === para);
-      const punto = sala.entregas[Math.max(0, idx)];
-      if (!punto) return;
-      const ch = os.characters.get(idDe);
-      if (!ch) return;
-      if (os.walkToTile(idDe, punto.col, punto.row)) {
-        notasRef.current.set(de, { tipo: "ok", texto: `Entregando a ${destino.name}…`, hasta: Date.now() + 9000 });
-        // Vuelve a su puesto cuando llega (o a los 15 s como máximo)
-        const inicio = Date.now();
-        const vigilar = window.setInterval(() => {
-          const c = os.characters.get(idDe);
-          const llego = c && c.state !== CharacterState.WALK && c.tileCol === punto.col && c.tileRow === punto.row;
-          if (!c || llego || Date.now() - inicio > 15000) {
-            window.clearInterval(vigilar);
-            window.setTimeout(() => os.sendToSeat(idDe), llego ? 1800 : 0);
-          }
-        }, 300);
-      }
-    }
-  }, [listo, s.runs, s.projects, agentesActivos, porId, porSlug, plano]);
-
-  // 4) Superposición (nombres, globos, pantallas) a 30 fps
+  // Refresca globos y notas cada segundo
   useEffect(() => {
-    let raf = 0;
-    let last = 0;
-    const loop = (t: number) => {
-      if (t - last > 33) {
-        last = t;
-        setTick((n) => (n + 1) % 1e6);
-      }
-      raf = requestAnimationFrame(loop);
-    };
-    raf = requestAnimationFrame(loop);
-    return () => cancelAnimationFrame(raf);
+    const t = window.setInterval(() => setReloj((n) => n + 1), 1000);
+    return () => window.clearInterval(t);
   }, []);
-
-  const onClickAgente = useCallback((id: number) => {
-    const slug = [...idsRef.current].find(([, v]) => v === id)?.[0] ?? null;
-    setSeleccion((prev) => (prev === slug ? null : slug));
-  }, []);
-
-  const os = osRef.current;
-  const el = contRef.current;
-  const pl = planoRef.current;
-  const proj =
-    os && el && pl
-      ? overlayProjection(pl.layout, el.getBoundingClientRect(), zoom, panRef.current, window.devicePixelRatio || 1)
-      : null;
-  const pxTile = proj ? proj.toScreenX(TILE_SIZE) - proj.toScreenX(0) : 0;
-  const agenteSel = seleccion ? porSlug.get(seleccion) : undefined;
 
   const pcConectado = s.heartbeat ? Date.now() - new Date(s.heartbeat).getTime() < 3 * 60 * 1000 : false;
   const errores24h = s.runs.filter((r) => r.status === "error" && Date.now() - new Date(r.created_at).getTime() < 86400000).length;
+  const nTrabajando = activos.filter(trabajando).length;
+
+  const robots: InfoRobot[] = activos
+    .filter((a) => asignacion.has(a.slug))
+    .map((a) => {
+      const run = ultimoRun.get(a.id);
+      const nota = notas.current.get(a.slug);
+      const viva = nota && nota.hasta > Date.now() ? nota : undefined;
+      const sel = seleccion === a.slug;
+      const texto = viva?.texto ?? (trabajando(a) ? run?.current_step || "Trabajando…" : sel ? a.last_summary || "Libre" : null);
+      return {
+        slug: a.slug,
+        nombre: a.name,
+        esJarvis: a.slug === "jarvis",
+        armadura: asignacion.get(a.slug)?.lider ? 0 : a.position,
+        globo: texto ? { texto: texto.length > 70 && !sel ? `${texto.slice(0, 67)}…` : texto, tipo: viva?.tipo ?? "trabajo" } : null,
+        seleccionado: sel,
+      };
+    });
+
+  const puestosEncendidos = new Set<Puesto>(
+    activos.filter(trabajando).map((a) => asignacion.get(a.slug)?.puesto).filter((p): p is Puesto => !!p),
+  );
+
+  const paredes: InfoSala[] = plano.salas.map((sala) => {
+    const proyecto = s.projects.find((p) => p.slug === sala.slug);
+    const tareas = proyecto ? s.tasks.filter((t) => t.project_id === proyecto.id) : [];
+    const hechas = tareas.filter((t) => t.status === "hecha").length;
+    const curso = tareas.filter((t) => t.status === "en_curso").length;
+    const deSala = activos.filter((a) => asignacion.get(a.slug)?.sala.slug === sala.slug);
+    const errSala = s.runs.filter(
+      (r) => r.status === "error" && deSala.some((a) => a.id === r.agent_id) && Date.now() - new Date(r.created_at).getTime() < 86400000,
+    ).length;
+    const pct = Math.round((s.spend.spent / Math.max(0.01, s.spend.budget)) * 100);
+    return {
+      slug: sala.slug,
+      contenido: (
+        <>
+          <b>{sala.nombre}</b>
+          {sala.tipo === "nucleo" ? (
+            <span>
+              API ${s.spend.spent.toFixed(2)}/{s.spend.budget} <i className="barra"><i style={{ width: `${Math.min(100, pct)}%` }} /></i>
+              {" · "}PC {pcConectado ? <em className="ok">en línea</em> : <em className="mal">desconectado</em>}
+              {errores24h > 0 && <> · <em className="mal">{errores24h} alerta{errores24h > 1 ? "s" : ""}</em></>}
+            </span>
+          ) : (
+            <span>
+              {proyecto?.status ?? ""} · {deSala.length} agente{deSala.length === 1 ? "" : "s"} · ◐ {curso} · ● {hechas}/{tareas.length}
+              {errSala > 0 && <> · <em className="mal">⚠ {errSala}</em></>}
+            </span>
+          )}
+        </>
+      ),
+    };
+  });
+
+  const agenteSel = seleccion ? s.agents.find((a) => a.slug === seleccion) : undefined;
 
   return (
     <section className="oficina">
       <div className="oficina-barra">
         <h2>Oficina</h2>
         <span className="muted small">
-          {agentesActivos.filter((a) => a.status === "working" || s.runs.some((r) => r.agent_id === a.id && (r.status === "running" || r.status === "queued"))).length} trabajando · {agentesActivos.length} agentes · {specs.length} salas
+          {nTrabajando} trabajando · {activos.length} agentes · {specs.length} salas
         </span>
         <div className="oficina-acciones">
-          <button className="btn btn-ghost small" onClick={() => setZoom((z) => Math.max(1, z - 1))} aria-label="Alejar">−</button>
-          <button className="btn btn-ghost small" onClick={ajustarZoom}>Ajustar</button>
-          <button className="btn btn-ghost small" onClick={() => setZoom((z) => Math.min(10, z + 1))} aria-label="Acercar">+</button>
+          <button className="btn btn-ghost small" onClick={() => { setSeleccion(null); setAjustar((n) => n + 1); }}>
+            Ver todo
+          </button>
         </div>
       </div>
 
-      <div className="oficina-escena" ref={contRef}>
-        {fallo && <p className="oficina-aviso">No pude cargar la oficina: {fallo}</p>}
-        {!listo && !fallo && <p className="oficina-aviso">Encendiendo la oficina…</p>}
-        {listo && os && (
-          <OfficeCanvas
-            officeState={os}
-            onClick={onClickAgente}
-            isEditMode={false}
-            editorState={editor}
-            onEditorTileAction={() => {}}
-            onEditorEraseAction={() => {}}
-            onEditorSelectionChange={() => {}}
-            onDeleteSelected={() => {}}
-            onRotateSelected={() => {}}
-            onDrop={() => {}}
-            editorTick={0}
-            zoom={zoom}
-            onZoomChange={setZoom}
-            panRef={panRef}
-            showAreas={false}
-            activeAreaLabel={null}
-          />
-        )}
-
-        {proj && os && pl && (
-          <div className="oficina-capa" aria-hidden="false">
-            {/* Pantalla de pared de cada sala */}
-            {pl.salas.map((sala) => {
-              const left = proj.toScreenX(sala.col * TILE_SIZE);
-              const top = proj.toScreenY((sala.row - 1) * TILE_SIZE) - pxTile * 0.95;
-              const width = sala.w * pxTile;
-              const proyecto = s.projects.find((p) => p.slug === sala.slug);
-              const tareas = proyecto ? s.tasks.filter((t) => t.project_id === proyecto.id) : [];
-              const hechas = tareas.filter((t) => t.status === "hecha").length;
-              const curso = tareas.filter((t) => t.status === "en_curso").length;
-              const agentesSala = agentesActivos.filter((a) => salaDeAgente(a, s.projects, pl.salas).slug === sala.slug);
-              const errSala = s.runs.filter(
-                (r) => r.status === "error" && agentesSala.some((a) => a.id === r.agent_id) && Date.now() - new Date(r.created_at).getTime() < 86400000,
-              ).length;
-              const pct = Math.round((s.spend.spent / Math.max(0.01, s.spend.budget)) * 100);
-              return (
-                <div key={sala.slug} className={`pared ${sala.tipo}`} style={{ left, top, width, fontSize: Math.max(9, pxTile * 0.32) }}>
-                  <b>{sala.nombre}</b>
-                  {sala.tipo === "nucleo" ? (
-                    <span>
-                      API ${s.spend.spent.toFixed(2)}/{s.spend.budget} <i className="barra"><i style={{ width: `${Math.min(100, pct)}%` }} /></i>
-                      {" · "}PC {pcConectado ? <em className="ok">en línea</em> : <em className="mal">desconectado</em>}
-                      {errores24h > 0 && <> · <em className="mal">{errores24h} alerta{errores24h > 1 ? "s" : ""}</em></>}
-                    </span>
-                  ) : (
-                    <span>
-                      {proyecto?.status ?? ""} · ◐ {curso} · ● {hechas}/{tareas.length}
-                      {errSala > 0 && <> · <em className="mal">⚠ {errSala}</em></>}
-                    </span>
-                  )}
-                </div>
-              );
-            })}
-
-            {/* Nombre y globo de cada agente */}
-            {agentesActivos.map((a) => {
-              const id = idsRef.current.get(a.slug);
-              const ch = id !== undefined ? os.characters.get(id) : undefined;
-              if (!ch) return null;
-              const sentado = ch.state === CharacterState.TYPE ? 6 : 0;
-              const x = proj.toScreenX(ch.x);
-              const yCabeza = proj.toScreenY(ch.y + sentado - 26);
-              const run = s.runs.find((r) => r.agent_id === a.id);
-              const nota = notasRef.current.get(a.slug);
-              const notaViva = nota && nota.hasta > Date.now() ? nota : undefined;
-              const trabajando = ch.isActive;
-              const texto = notaViva?.texto ?? (trabajando ? run?.current_step || "Trabajando…" : null);
-              const sel = seleccion === a.slug;
-              return (
-                <div key={a.slug} className="agente-capa" style={{ left: x, top: yCabeza, fontSize: Math.max(8, Math.min(12, pxTile * 0.36)) }}>
-                  {texto && (sel || trabajando || notaViva) && (
-                    <div className={`globo ${notaViva?.tipo ?? "trabajo"}`}>{texto.length > 60 && !sel ? `${texto.slice(0, 57)}…` : texto}</div>
-                  )}
-                  <div className={`nombre ${a.slug === "jarvis" ? "jarvis" : ""} ${sel ? "sel" : ""} ${trabajando ? "activo" : ""}`}>
-                    {a.slug === "jarvis" ? "J.A.R.V.I.S." : a.name}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
+      <div className="oficina-escena">
+        <Escena
+          plano={plano}
+          mundo={mundo}
+          robots={robots}
+          paredes={paredes}
+          puestosEncendidos={puestosEncendidos}
+          onSeleccionar={setSeleccion}
+          enfocar={seleccion}
+          ajustarClave={ajustar}
+        />
       </div>
 
       {agenteSel && <PanelAgente a={agenteSel} runs={s.runs.filter((r) => r.agent_id === agenteSel.id)} onClose={() => setSeleccion(null)} />}
       <p className="muted small oficina-ayuda">
-        Toca un agente para ver qué hace · arrastra para moverte · rueda o pellizco para acercar. En el celular, usa el teléfono en horizontal.
+        Toca un robot para ver qué hace · arrastra para girar · clic derecho o dos dedos para moverte · rueda o pellizco para acercar.
       </p>
     </section>
   );
 }
 
 function PanelAgente({ a, runs, onClose }: { a: AgentRow; runs: AgentRun[]; onClose: () => void }) {
-  const actual = runs.find((r) => r.status === "running" || r.status === "queued");
+  const actual = runs.find(enCurso);
   const costo = runs.reduce((t, r) => t + (Number(r.cost_usd) || 0), 0);
   return (
     <aside className="panel oficina-panel" aria-label={`Detalle de ${a.name}`}>
@@ -377,7 +249,7 @@ function PanelAgente({ a, runs, onClose }: { a: AgentRow; runs: AgentRun[]; onCl
         {a.role} · {a.runtime === "local" ? "motor local (tu PC)" : a.runtime === "api" ? "servidor" : "chat Claude"} · {a.model.replace("claude-", "")}
       </p>
       <p>
-        <span className={`estado-punto ${a.status}`} /> {a.status === "working" ? "Trabajando" : a.status === "error" ? "Con error" : "Libre"}
+        <span className={`estado-punto ${actual ? "working" : a.status}`} /> {actual || a.status === "working" ? "Trabajando" : a.status === "error" ? "Con error" : "Libre"}
         {actual?.current_step && <> — <i>{actual.current_step}</i></>}
       </p>
       {a.last_summary && (
