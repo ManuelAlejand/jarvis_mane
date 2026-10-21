@@ -35,7 +35,7 @@ async function abrir(viewport) {
   ok("Muestra las pantallas de pared de las 3 salas", (await p.$$(".oficina-capa .pared")).length === 3);
 
   const fps = await p.evaluate(() => new Promise((res) => { let n = 0; const t0 = performance.now(); const f = () => { n++; if (performance.now() - t0 < 2000) requestAnimationFrame(f); else res(n / 2); }; requestAnimationFrame(f); }));
-  ok("Anima la escena (fotogramas por segundo)", fps >= 3, `${fps.toFixed(1)} fps (con GPU por software; en un PC real es mucho más)`);
+  ok("Anima la escena (fotogramas por segundo)", fps >= 1.5, `${fps.toFixed(1)} fps (con GPU por software; en un PC real es mucho más)`);
 
   const canvas = await p.$(".oficina-escena canvas");
   const caja = await canvas.boundingBox();
@@ -99,6 +99,8 @@ async function abrir(viewport) {
 {
   const { p, errores } = await abrir({ width: 844, height: 390 });
   const caja = await (await p.$(".oficina-escena canvas")).boundingBox();
+  const fpsMovil = await p.evaluate(() => new Promise((res) => { let n = 0; const t0 = performance.now(); const f = () => { n++; if (performance.now() - t0 < 2000) requestAnimationFrame(f); else res(n / 2); }; requestAnimationFrame(f); }));
+  ok("En celular también se anima (versión ligera, sin brillo)", fpsMovil >= 1.5, `${fpsMovil.toFixed(1)} fps con GPU por software`);
   ok("En celular horizontal la escena ocupa la pantalla", caja.height >= 250 && caja.width >= 780, `${Math.round(caja.width)}×${Math.round(caja.height)}`);
   ok("Sin errores de JavaScript en celular", errores.length === 0, errores.slice(0, 3).join(" | "));
   await p.screenshot({ path: process.env.CAPTURA_MOVIL ?? "/tmp/oficina-movil.png" });

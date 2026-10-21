@@ -13,6 +13,7 @@ import { clone as clonarEsqueleto } from "three/examples/jsm/utils/SkeletonUtils
 import type { OrbitControls as OrbitImpl } from "three-stdlib";
 import type { Anim, Mundo } from "@/lib/oficina/mundo";
 import type { Plano, Puesto, Sala } from "@/lib/oficina/plano";
+import { Ciudad } from "@/components/oficina3d/Ciudad";
 
 const ROBOT_URL = "/oficina3d/robot.glb";
 const ALTURA_ROBOT = 1.6;
@@ -75,12 +76,12 @@ export function Escena(props: Props) {
     <>
     <Canvas
       dpr={alta ? [1, 1.75] : [1, 1.5]}
-      camera={{ fov: 38, near: 0.1, far: 300, position: [20, 22, 40] }}
+      camera={{ fov: 38, near: 0.1, far: 900, position: [20, 22, 40] }}
       gl={{ antialias: true }}
       onPointerMissed={() => props.onSeleccionar(null)}
     >
-      <color attach="background" args={["#050c14"]} />
-      <fog attach="fog" args={["#050c14", 45, 120]} />
+      <color attach="background" args={["#02060d"]} />
+      <fog attach="fog" args={["#071a2b", 70, 260]} />
       <ambientLight intensity={0.6} color="#a9d2ff" />
       <hemisphereLight args={["#d6f0ff", "#0a1220", 0.9]} />
       <directionalLight position={[15, 30, 22]} intensity={1.8} />
@@ -158,6 +159,7 @@ function Contenido({ plano, mundo, robots, puestosEncendidos, onSeleccionar, enf
   return (
     <>
       <Camara plano={plano} centro={centro} mundo={mundo} enfocar={enfocar} ajustarClave={ajustarClave} />
+      <Ciudad plano={plano} alta={alta} />
       <Suelo plano={plano} />
       <Paredes plano={plano} />
       {plano.salas.map((s) => (
@@ -199,7 +201,7 @@ function Camara({ plano, centro, mundo, enfocar, ajustarClave }: { plano: Plano;
     const mediaV = THREE.MathUtils.degToRad(persp.fov / 2);
     const ancho = plano.cols * 1.12;
     const fondo = plano.rows * 1.15;
-    const d = Math.max(ancho / 2 / (Math.tan(mediaV) * aspecto), fondo / 2 / Math.tan(mediaV));
+    const d = Math.max(ancho / 2 / (Math.tan(mediaV) * aspecto), fondo / 2 / Math.tan(mediaV)) * 1.18; // un poco de ciudad alrededor
     const dir = new THREE.Vector3(0, 1.0, 0.62).normalize();
     camera.position.copy(centro).addScaledVector(dir, d);
     controles.current?.target.copy(centro);
@@ -235,7 +237,7 @@ function Camara({ plano, centro, mundo, enfocar, ajustarClave }: { plano: Plano;
       dampingFactor={0.12}
       maxPolarAngle={1.2}
       minDistance={4}
-      maxDistance={120}
+      maxDistance={125}
       onStart={() => (siguiendo.current = null)}
     />
   );
@@ -253,7 +255,7 @@ function Suelo({ plano }: { plano: Plano }) {
   return (
     <group>
       <mesh rotation-x={-Math.PI / 2} position={[plano.cols / 2, -0.01, plano.rows / 2]}>
-        <planeGeometry args={[plano.cols + 6, plano.rows + 6]} />
+        <planeGeometry args={[plano.cols + 4, plano.rows + 4]} />
         <meshStandardMaterial color="#070f18" metalness={0.6} roughness={0.7} />
       </mesh>
       {plano.salas.map((s) => (
