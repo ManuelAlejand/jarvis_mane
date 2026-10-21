@@ -66,6 +66,8 @@ const HELP = [
   "/reintentar V1 — relanzar un Short que falló",
   "/agente investigador busca nichos de misterio — darle una orden",
   "/agente radar explora nichos y locales para la Auditoría GEO en Bogotá — Radar (en tu PC, 0 USD)",
+  "/agente critico valida la idea de la Auditoría GEO — Crítico: clientes simulados y veredicto",
+  "/agente arquitecto haz el plano del módulo GEO en JARVIS — Arquitecto: plano técnico",
   "",
   "También entiendo: <i>pendientes</i>, <i>cómo va todo</i>, <i>cómo va youtube</i>, <i>gasto</i>.",
   "Y texto libre: <i>recuérdame comprar el dominio, es urgente</i> 🧠",

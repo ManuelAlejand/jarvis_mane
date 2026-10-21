@@ -21,7 +21,7 @@ async function abrir(viewport, query = "") {
   p.on("console", (m) => { if (m.type() === "error" && !/Failed to load resource|fonts\.googleapis/.test(m.text())) errores.push(m.text()); });
   await p.goto(`${BASE}/demo/oficina${query}`);
   await p.waitForSelector(".oficina-escena canvas", { timeout: 30000 });
-  await p.waitForFunction(() => document.querySelectorAll(".oficina-capa .nombre").length >= 10, null, { timeout: 60000, polling: 500 });
+  await p.waitForFunction(() => document.querySelectorAll(".oficina-capa .nombre").length >= 12, null, { timeout: 60000, polling: 500 });
   await p.waitForTimeout(2500);
   return { p, errores };
 }
@@ -30,7 +30,7 @@ async function abrir(viewport, query = "") {
 {
   const { p, errores } = await abrir({ width: 1440, height: 900 });
   const nombres = await p.$$eval(".oficina-capa .nombre", (els) => els.map((e) => e.textContent));
-  ok("Carga la escena 3D con los 10 agentes (8 + 2 líderes)", nombres.length === 10, nombres.join(", "));
+  ok("Carga la escena 3D con los 12 agentes (10 + 2 líderes)", nombres.length === 12, nombres.join(", "));
   ok("Los líderes llevan su insignia", (await p.$$(".oficina-capa .corona")).length === 2);
   ok("Muestra las pantallas de pared de las 3 salas", (await p.$$(".oficina-capa .pared")).length === 3);
 
@@ -102,7 +102,7 @@ async function abrir(viewport, query = "") {
 {
   const { p, errores } = await abrir({ width: 1440, height: 900 }, "?hora=13&clima=lluvia");
   const canvas = await p.$(".oficina-escena canvas");
-  ok("Muestra el minimapa con todos los agentes", (await p.$$(".minimapa .mm-robot")).length === 10);
+  ok("Muestra el minimapa con todos los agentes", (await p.$$(".minimapa .mm-robot")).length === 12);
   ok("El ambiente refleja la hora y el clima pedidos", ((await p.textContent(".hud-ambiente")) ?? "").includes("lluvia"), await p.textContent(".hud-ambiente"));
   ok("El registro de misión lista eventos", (await p.$$(".hud-registro li")).length >= 1);
 
@@ -171,7 +171,8 @@ async function abrir(viewport, query = "") {
   const conEmojis = await p.evaluate(() => (document.querySelector(".oficina")?.innerText ?? "").match(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}]/gu) ?? []);
   ok("La interfaz usa iconos, no emojis", conEmojis.length === 0, conEmojis.slice(0, 5).join(" "));
   ok("Radar (explorador de nichos) trabaja en la sala de Auditoría GEO", await p.$$eval(".oficina-capa .nombre", (els) => els.some((e) => e.textContent.includes("Radar"))));
-  ok("Los agentes llevan su icono junto al nombre", (await p.$$(".oficina-capa .nombre svg")).length >= 10);
+  ok("Crítico y Arquitecto trabajan en el Núcleo junto a JARVIS", await p.$$eval(".oficina-capa .nombre", (els) => ["Crítico", "Arquitecto"].every((n) => els.some((e) => e.textContent.includes(n)))));
+  ok("Los agentes llevan su icono junto al nombre", (await p.$$(".oficina-capa .nombre svg")).length >= 12);
   ok("Sin errores de JavaScript con las funciones nuevas", errores.length === 0, errores.slice(0, 3).join(" | "));
   await p.screenshot({ path: process.env.CAPTURA_LLUVIA ?? "/tmp/oficina-lluvia.png" });
   await p.close();
@@ -200,7 +201,7 @@ await b.close();
   p.on("pageerror", (e) => errores.push(e.message));
   await p.goto(`${BASE}/demo/oficina`);
   await p.waitForSelector(".oficina-respaldo li", { timeout: 30000 });
-  ok("Sin WebGL muestra el equipo en lista", (await p.$$(".oficina-respaldo li")).length === 10);
+  ok("Sin WebGL muestra el equipo en lista", (await p.$$(".oficina-respaldo li")).length === 12);
   await p.locator(".oficina-respaldo .enlace", { hasText: "Validador" }).click();
   await p.waitForSelector(".oficina-panel h3", { timeout: 5000 });
   ok("Sin WebGL también se abre el panel del agente", (await p.textContent(".oficina-panel h3")).includes("Validador"));

@@ -5,7 +5,10 @@ Pide trabajo a JARVIS cada pocos segundos y lo ejecuta aquí:
              → Validador (Claude Code) con hasta 2 rondas de corrección
              → te envía el Short por Telegram con los botones Publicar / Cambiar / Descartar
   publicar → Publicador: sube el Short a YouTube en privado, con divulgación de IA
-  radar    → Radar: investiga nichos y locales con la skill radar-nichos (Claude Code, plan Pro)
+  radar      → Radar: investiga nichos y locales (skill radar-nichos)
+  critico    → Crítico: valida ideas con clientes simulados (skill validar-idea)
+  arquitecto → Arquitecto: diseña el plano técnico (skill arquitecto-express)
+               (los tres con Claude Code y tu plan Pro: 0 USD de API)
 
 Uso (desde la carpeta del estudio):  python puente.py          # se queda escuchando
                                      python puente.py --una-vez  # procesa un trabajo y sale
@@ -581,9 +584,31 @@ def flujo_publicar(video: dict) -> None:
                         f"Revísalo y hazlo público desde YouTube Studio:\n{data.get('studio') or data['url']}"))
 
 
-# ----------------------------------------------------------------------------- Radar (nichos y locales)
+# ----------------------------------------------------------------------------- agentes con skill (Radar, Crítico, Arquitecto)
+# Cada agente "local" con skill toma su orden de JARVIS, la ejecuta con Claude Code (plan Pro, 0 USD de API)
+# usando su skill de .claude/skills/, reporta el avance (la Oficina lo muestra trabajando) y entrega el informe.
 
-RADAR_TIMEOUT = int(os.environ.get("RADAR_TIMEOUT_SEG", "2700"))  # 45 min
+AGENTES_SKILL = {
+    "radar": {
+        "skill": "radar-nichos", "carpeta": "radar", "archivos": ("informe.md", "resultado.json"),
+        "paso": "Investigando nichos y locales", "inicio": "Leyendo la skill y preparando la búsqueda",
+        "extra": ("Si la orden trata de la Auditoría GEO, la oferta es: diagnóstico de si un negocio local aparece en "
+                  "ChatGPT/Gemini/Perplexity + mensualidad para mejorar su perfil de Google, reseñas, FAQ y directorios "
+                  "(COP 250-600 mil/mes; auditoría COP 200-400 mil)."),
+    },
+    "critico": {
+        "skill": "validar-idea", "carpeta": "validaciones", "archivos": ("validacion.md",),
+        "paso": "Poniendo a prueba la idea", "inicio": "Leyendo la idea y la skill",
+        "extra": "Escribe el resultado completo en `validacion.md`.",
+    },
+    "arquitecto": {
+        "skill": "arquitecto-express", "carpeta": "blueprints", "archivos": ("blueprint.md", "CLAUDE.md"),
+        "paso": "Diseñando el plano", "inicio": "Leyendo el proyecto y la skill",
+        "extra": ("Escribe `blueprint.md` y `CLAUDE.md` en la carpeta de salida. Para verificar versiones de paquetes usa "
+                  "WebFetch sobre https://registry.npmjs.org/<paquete> o https://pypi.org/pypi/<paquete>/json."),
+    },
+}
+SKILL_TIMEOUT = int(os.environ.get("SKILL_TIMEOUT_SEG", os.environ.get("RADAR_TIMEOUT_SEG", "2700")))  # 45 min
 
 
 def reportar_run(run_id: str, **campos) -> None:
@@ -593,66 +618,81 @@ def reportar_run(run_id: str, **campos) -> None:
         log(f"  (no se pudo reportar la orden a JARVIS: {e})")
 
 
-def instrucciones_radar(orden: str, carpeta: Path) -> str:
-    return f"""Usa la skill `radar-nichos`: lee `.claude/skills/radar-nichos/SKILL.md` y síguela al pie de la letra.
+def instrucciones_skill(cfg: dict, orden: str, carpeta: Path, contexto: dict | None) -> str:
+    ctx = ""
+    if contexto and contexto.get("spec_md"):
+        (carpeta / "contexto.md").write_text(contexto["spec_md"], encoding="utf-8")
+        ctx = (f"\nContexto: la orden trata del proyecto «{contexto.get('proyecto')}» (estado: {contexto.get('estado')}). "
+               f"Su ficha completa está en `{carpeta / 'contexto.md'}`: léela primero y no preguntes lo que ya dice.")
+    return f"""Usa la skill `{cfg['skill']}`: lee `.claude/skills/{cfg['skill']}/SKILL.md` y síguela al pie de la letra.
+
+MODO SIN INTERACCIÓN: nadie puede responderte durante este trabajo. No hagas preguntas ni esperes un "sí":
+cuando la skill pida preguntar o confirmar, toma el supuesto más razonable, escríbelo en una sección "Supuestos"
+(y, si la skill pide aprobación, marca el resultado como BORRADOR pendiente de aprobación de Manuel) y continúa.
 
 Orden de Manuel (vía JARVIS):
 {orden}
-
+{ctx}
 Carpeta de salida (ya existe; escribe AQUÍ, no crees otra): {carpeta}
-Debes dejar `informe.md` y `resultado.json` (forma exacta de la skill) en esa carpeta.
-Si la orden trata de la Auditoría GEO, la oferta es: diagnóstico de si un negocio local aparece en ChatGPT/Gemini/Perplexity
-+ mensualidad para mejorar su perfil de Google, reseñas, FAQ y directorios (COP 250-600 mil/mes; auditoría COP 200-400 mil).
-Al terminar responde solo con la línea `Resumen: …`."""
+{cfg['extra']}
+Al terminar responde solo con la línea `Resumen: …` (máx. 140 caracteres)."""
 
 
-def flujo_radar(run: dict) -> None:
+def flujo_skill(slug_agente: str, run: dict, contexto: dict | None) -> None:
+    cfg = AGENTES_SKILL[slug_agente]
     orden = (run.get("input") or "").strip()
-    carpeta = RAIZ / "radar" / f"{datetime.now():%Y-%m-%d}-{slug(orden)}"
+    carpeta = RAIZ / cfg["carpeta"] / f"{datetime.now():%Y-%m-%d}-{slug(orden)}"
     carpeta.mkdir(parents=True, exist_ok=True)
-    log(f"Radar: «{orden[:80]}» → {carpeta.name}")
-    reportar_run(run["id"], status="running", step="Leyendo la skill y preparando la búsqueda")
+    log(f"{slug_agente}: «{orden[:80]}» → {cfg['carpeta']}/{carpeta.name}")
+    reportar_run(run["id"], status="running", step=cfg["inicio"])
     inicio = time.time()
     listo = threading.Event()
 
     def latido() -> None:  # la Oficina lo muestra trabajando con el minuto en curso
         while not listo.wait(60):
-            reportar_run(run["id"], status="running", step=f"Investigando en internet · {int((time.time() - inicio) // 60)} min")
+            reportar_run(run["id"], status="running", step=f"{cfg['paso']} · {int((time.time() - inicio) // 60)} min")
 
-    hilo = threading.Thread(target=latido, daemon=True)
-    hilo.start()
+    threading.Thread(target=latido, daemon=True).start()
     try:
-        salida = claude_cli(instrucciones_radar(orden, carpeta), "radar", "Investigando nichos y locales", RADAR_TIMEOUT)
+        salida = claude_cli(instrucciones_skill(cfg, orden, carpeta, contexto), slug_agente, cfg["paso"], SKILL_TIMEOUT)
     finally:
         listo.set()
-    informe = carpeta / "informe.md"
-    datos = carpeta / "resultado.json"
+    principal = carpeta / cfg["archivos"][0]
     resultado = None
+    datos = carpeta / "resultado.json"
     if datos.exists():
         try:
             resultado = leer_json(datos)
         except Exception as e:  # noqa: BLE001
             log(f"  resultado.json no es válido: {e}")
     m = re.search(r"^\s*Resumen:\s*(.+)$", salida, re.M)
-    resumen = ((resultado or {}).get("resumen") or (m.group(1) if m else "") or "Investigación lista").strip()[:140]
-    if not informe.exists() and not resultado:
-        raise Fallo("Claude Code terminó pero no dejó informe.md ni resultado.json")
-    texto = informe.read_text(encoding="utf-8") if informe.exists() else salida
-    n_nichos = len((resultado or {}).get("nichos") or [])
-    n_locales = len((resultado or {}).get("locales") or [])
-    reportar_run(run["id"], status="done", summary=resumen,
-                 output=f"{texto[:60000]}\n\n_Archivos en el PC: radar/{carpeta.name}/_", result=resultado,
-                 step=f"{n_nichos} nichos · {n_locales} locales")
-    log(f"Radar listo: {resumen}")
+    resumen = ((resultado or {}).get("resumen") or (m.group(1) if m else "") or "Trabajo listo").strip()[:140]
+    if not principal.exists() and not resultado:
+        raise Fallo(f"Claude Code terminó pero no dejó {cfg['archivos'][0]}")
+    texto = principal.read_text(encoding="utf-8") if principal.exists() else salida
+    paso = f"{len(resultado.get('nichos') or [])} nichos · {len(resultado.get('locales') or [])} locales" if resultado else None
+    reportar_run(run["id"], status="done", summary=resumen, result=resultado, step=paso,
+                 output=f"{texto[:60000]}\n\n_Archivos en el PC: {cfg['carpeta']}/{carpeta.name}/_")
+    log(f"{slug_agente} listo: {resumen}")
 
 
-def procesar_radar(run: dict) -> None:
+def procesar_skill(slug_agente: str, run: dict, contexto: dict | None) -> None:
     try:
-        flujo_radar(run)
+        flujo_skill(slug_agente, run, contexto)
     except Exception as e:  # noqa: BLE001
         detalle = str(e) if isinstance(e, Fallo) else f"{type(e).__name__}: {e}"
-        log(f"ERROR Radar: {detalle}\n{traceback.format_exc()}")
+        log(f"ERROR {slug_agente}: {detalle}\n{traceback.format_exc()}")
         reportar_run(run["id"], status="error", summary=detalle[:300])
+
+
+def siguiente_orden_skill() -> bool:
+    """Busca una orden pendiente para Radar, Crítico o Arquitecto. True si procesó una."""
+    for slug_agente in AGENTES_SKILL:
+        r = api("GET", f"/api/agents/next?agent={slug_agente}")
+        if r.get("run"):
+            procesar_skill(slug_agente, r["run"], r.get("contexto"))
+            return True
+    return False
 
 
 # ----------------------------------------------------------------------------- bucle
@@ -728,9 +768,7 @@ def main() -> None:
             if t:
                 procesar(t)
                 continue  # puede haber más en cola
-            orden = api("GET", "/api/agents/next?agent=radar").get("run")
-            if orden:
-                procesar_radar(orden)
+            if siguiente_orden_skill():
                 continue
             if una:
                 return

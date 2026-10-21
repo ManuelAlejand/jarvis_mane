@@ -135,6 +135,9 @@ export function generarPlano(specs: SalaSpec[]): Plano {
     if (s.tipo === "nucleo") {
       // Consola de JARVIS, mesa holográfica grande y una sala de estar
       escritorio(8, 1);
+      // Mesa de estrategia: el Crítico (valida ideas) y el Arquitecto (planos), a los lados de JARVIS
+      escritorio(1, 3);
+      escritorio(16, 3);
       holo = { c: c0 + 9, r: r0 + 6 };
       ocupar(holo.c, holo.r, 2, 2);
       m("alfombra", 6, 4, 8, 6, false);

@@ -95,7 +95,7 @@ export async function startRun(
     const where =
       agent.runtime === "chat"
         ? "Ábrela en el chat de Claude (proyecto Jarvis) con «procesa las órdenes pendientes»."
-        : "El motor local la tomará cuando tu PC esté encendido.";
+        : "Tu PC la toma en unos segundos si el puente está encendido (python puente.py). Míralo trabajar en la Oficina del panel; te aviso aquí cuando termine.";
     return { ok: true, text: `📋 <b>${esc(agent.name)}</b> · ${esc(agent.role)} tiene la orden en cola.\n${where}` };
   }
 

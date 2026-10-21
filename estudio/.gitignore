@@ -11,3 +11,5 @@ assets/musica/*.mp3
 assets/musica/*.wav
 assets/voces/*.wav
 radar/
+validaciones/
+blueprints/
