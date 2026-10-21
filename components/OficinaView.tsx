@@ -9,6 +9,14 @@ import type { AgentRow, AgentRun, Project } from "@/lib/types";
 import { generarPlano, type Puesto, type Sala, type SalaSpec } from "@/lib/oficina/plano";
 import { Mundo } from "@/lib/oficina/mundo";
 import { Escena, type InfoRobot, type InfoSala } from "@/components/oficina3d/Escena";
+import { projectProgress } from "@/components/useJarvis";
+import { ConsolaJarvis, type ConsolaApi, type Enviar } from "@/components/oficina3d/ConsolaJarvis";
+import { Minimapa } from "@/components/oficina3d/Minimapa";
+import { useAmbiente } from "@/lib/oficina/useAmbiente";
+import { iconoAmbiente, NOMBRE_CLIMA } from "@/lib/oficina/ambiente";
+import { activarSonido, activarVoz, hablar, hayVozSintetica, sonar, sonidoActivo, vozJarvisActiva } from "@/lib/oficina/sonido";
+import type { ModoVoz } from "@/lib/oficina/mundo";
+import { estadisticasDe } from "@/lib/oficina/estadisticas";
 
 const ESTUDIO = new Set(["explorador", "investigador", "guionista", "productor", "validador", "publicador"]);
 const NOTA_MS = 25000; // tiempo que se ve "listo" o "error" sobre la cabeza
@@ -72,8 +80,38 @@ class Respaldo3D extends Component<{ alterno: ReactNode; children: ReactNode }, 
   }
 }
 
-export function OficinaView({ s }: { s: JarvisState }) {
-  const [seleccion, setSeleccion] = useState<string | null>(null);
+/** Colores de los puntos del minimapa (iguales a las armaduras) */
+const COLOR_PUNTO = ["#e8b04b", "#d8433b", "#e0a526", "#b8c0c9", "#7d858e", "#b03030", "#5f8fbf"];
+const ANUNCIO_MS = 20000; // como mucho un anuncio hablado cada 20 s
+
+export function OficinaView({ s, enviar }: { s: JarvisState; enviar: Enviar }) {
+  const [seleccion, setSeleccionBase] = useState<string | null>(null);
+  const setSeleccion = useCallback((slug: string | null) => {
+    if (slug) sonar("clic");
+    setSeleccionBase(slug);
+  }, []);
+  const [vuelo, setVuelo] = useState<{ sala: string | null; clave: number }>({ sala: null, clave: 0 });
+  const [salaActual, setSalaActual] = useState<string | null>(null);
+  const [tour, setTour] = useState(false);
+  const [fotoClave, setFotoClave] = useState(0);
+  const [flash, setFlash] = useState(false);
+  const [ayuda, setAyuda] = useState(false);
+  const [registroAbierto, setRegistroAbierto] = useState(true);
+  const [sonidoOn, setSonidoOn] = useState(false);
+  const [vozOn, setVozOn] = useState(false);
+  const [compacta, setCompacta] = useState(false);
+  const consola = useRef<ConsolaApi>(null);
+  const ultimoUso = useRef(Date.now());
+  const ultimoAnuncio = useRef(0);
+  const ambiente = useAmbiente();
+  useEffect(() => {
+    setSonidoOn(sonidoActivo());
+    setVozOn(vozJarvisActiva());
+    const chica = window.innerWidth < 900 || window.matchMedia("(pointer: coarse)").matches;
+    setCompacta(chica);
+    if (chica) setRegistroAbierto(false);
+    if (new URLSearchParams(window.location.search).get("tour") === "1") setTour(true);
+  }, []);
   const [ajustar, setAjustar] = useState(0);
   const [arrancando, setArrancando] = useState(true);
   const [webgl] = useState(() => (typeof window === "undefined" ? true : hayWebGL()));
@@ -86,6 +124,11 @@ export function OficinaView({ s }: { s: JarvisState }) {
   const runsVistos = useRef<Map<string, AgentRun["status"]> | null>(null);
 
   const specs = useMemo(() => salasDe(s.projects, s.agents), [s.projects, s.agents]);
+  const detenerTour = useCallback(() => {
+    ultimoUso.current = Date.now();
+    setTour(false);
+    setSalaActual(null);
+  }, []);
   const firma = specs.map((x) => `${x.slug}:${x.nombre}`).join("|");
   // El plano solo se regenera si cambian las salas (no en cada actualización de datos)
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -167,6 +210,7 @@ export function OficinaView({ s }: { s: JarvisState }) {
             entregaron.add(deAgente);
             mundo.entregar(deAgente, agente.slug);
             nota(deAgente, "ok", `Entregando a ${agente.name}…`, 9000);
+            sonar("entrega");
           } else if (agente.slug !== "jarvis") {
             // Pedido nuevo: JARVIS se lo lleva al líder y el líder al trabajador
             if (lider && lider !== agente.slug) {
@@ -184,12 +228,21 @@ export function OficinaView({ s }: { s: JarvisState }) {
         if (antes !== undefined && antes !== r.status) {
           if (r.status === "done") {
             mundo.gesto(agente.slug, "ThumbsUp", 2600);
+            mundo.efecto("ok", agente.slug);
             nota(agente.slug, "ok", r.summary ?? "Trabajo terminado");
             terminados.push({ slug: agente.slug, r });
+            sonar("ok");
           } else if (r.status === "error") {
             mundo.gesto(agente.slug, "No", 2600);
+            mundo.efecto("error", agente.slug);
             nota(agente.slug, "error", r.error ?? "Se detuvo");
             terminados.push({ slug: agente.slug, r });
+            sonar("error");
+          }
+          // JARVIS lo anuncia en voz alta (si activaste la voz)
+          if ((r.status === "done" || r.status === "error") && Date.now() - ultimoAnuncio.current > ANUNCIO_MS && mundo.voz === "normal") {
+            ultimoAnuncio.current = Date.now();
+            hablar(r.status === "done" ? `Señor, ${agente.name} terminó. ${r.summary ?? ""}` : `Atención: ${agente.name} tuvo un problema. ${r.error ?? ""}`);
           }
         }
       }
@@ -208,6 +261,31 @@ export function OficinaView({ s }: { s: JarvisState }) {
     runsVistos.current = new Map(s.runs.map((r) => [r.id, r.status]));
     void ahora;
   }, [s.runs, s.agents, porId, mundo, asignacion, liderSala]);
+
+  // Registro de misión: lo último que pasó (ejecuciones y alertas), del más nuevo al más viejo
+  const registro = useMemo(() => {
+    type Ev = { id: string; t: number; icono: string; texto: string; slug?: string; tipo: "info" | "ok" | "error" };
+    const out: Ev[] = [];
+    for (const r of s.runs.slice(0, 30)) {
+      const a = porId.get(r.agent_id);
+      if (!a) continue;
+      const nombre = a.slug === "jarvis" ? "JARVIS" : a.name;
+      const ini = new Date(r.started_at ?? r.created_at).getTime();
+      out.push({ id: `${r.id}:i`, t: ini, icono: a.emoji ?? "▶", texto: `${nombre} empezó · ${(r.input ?? "").slice(0, 60)}`, slug: a.slug, tipo: "info" });
+      if (r.status === "done" || r.status === "error") {
+        const fin = r.finished_at ? new Date(r.finished_at).getTime() : ini + 1;
+        out.push({
+          id: `${r.id}:f`, t: Math.max(fin, ini + 1), icono: r.status === "done" ? "✔" : "⚠",
+          texto: `${nombre} · ${(r.status === "done" ? r.summary ?? "terminó" : r.error ?? "falló").slice(0, 70)}`, slug: a.slug, tipo: r.status === "done" ? "ok" : "error",
+        });
+      }
+    }
+    for (const l of s.logs.slice(0, 20)) {
+      if (l.level !== "error" && l.level !== "warn") continue;
+      out.push({ id: `log:${l.id}`, t: new Date(l.created_at).getTime(), icono: l.level === "error" ? "⛔" : "⚠", texto: `${l.source} · ${l.message.slice(0, 70)}`, tipo: "error" });
+    }
+    return out.sort((a, b) => b.t - a.t).slice(0, 8);
+  }, [s.runs, s.logs, porId]);
 
   // Frases de personalidad: de vez en cuando alguien libre comenta algo (refs: el intervalo no se reinicia con cada dato)
   const paraFrases = useRef({ activos, trabajando });
@@ -230,6 +308,103 @@ export function OficinaView({ s }: { s: JarvisState }) {
     const t = window.setInterval(() => setReloj((n) => n + 1), 1000);
     return () => window.clearInterval(t);
   }, []);
+
+  const irASala = useCallback((slug: string | null) => {
+    setSeleccionBase(null);
+    setTour(false);
+    setSalaActual(slug);
+    setVuelo((v) => ({ sala: slug, clave: v.clave + 1 }));
+    sonar("vuelo");
+  }, []);
+
+  // Recorrido automático tras 2 min sin tocar nada (como un salvapantallas); cualquier gesto lo corta
+  useEffect(() => {
+    const uso = () => (ultimoUso.current = Date.now());
+    const evs = ["pointerdown", "keydown", "wheel", "touchstart"] as const;
+    evs.forEach((e) => window.addEventListener(e, uso, { passive: true }));
+    const t = window.setInterval(() => {
+      if (!document.hidden && Date.now() - ultimoUso.current > 120_000) setTour(true);
+    }, 5000);
+    return () => {
+      evs.forEach((e) => window.removeEventListener(e, uso));
+      window.clearInterval(t);
+    };
+  }, []);
+
+  // Atajos de teclado
+  const salasRef = useRef(plano.salas);
+  salasRef.current = plano.salas;
+  useEffect(() => {
+    const tecla = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) {
+        if (e.key === "Escape") t.blur();
+        return;
+      }
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      const k = e.key.toLowerCase();
+      if (k === "escape") {
+        setSeleccionBase(null);
+        setAyuda(false);
+        setTour(false);
+      } else if (k === "0") irASala(null);
+      else if (/^[1-9]$/.test(k)) {
+        const sala = salasRef.current[Number(k) - 1];
+        if (sala) irASala(sala.slug);
+      } else if (k === "j") setSeleccion("jarvis");
+      else if (k === "t") setTour((x) => !x);
+      else if (k === "f") setFotoClave((n) => n + 1);
+      else if (k === "m") {
+        const v = !sonidoActivo();
+        activarSonido(v);
+        setSonidoOn(v);
+      } else if (k === "v") consola.current?.microfono();
+      else if (k === "/") {
+        e.preventDefault();
+        consola.current?.enfocar();
+      } else if (k === "?" || (k === "h" && !e.shiftKey)) setAyuda((x) => !x);
+      else return;
+      ultimoUso.current = Date.now();
+    };
+    window.addEventListener("keydown", tecla);
+    return () => window.removeEventListener("keydown", tecla);
+  }, [irASala, setSeleccion]);
+
+  /** Foto: la imagen de la escena + una marca con fecha, y se descarga. */
+  const guardarFoto = useCallback((url: string) => {
+    setFlash(true);
+    window.setTimeout(() => setFlash(false), 450);
+    sonar("ok");
+    const img = new Image();
+    img.onload = () => {
+      const c = document.createElement("canvas");
+      c.width = img.width;
+      c.height = img.height;
+      const g = c.getContext("2d");
+      if (!g) return;
+      g.drawImage(img, 0, 0);
+      const fecha = new Date().toLocaleString("es-CO", { dateStyle: "medium", timeStyle: "short" });
+      const tam = Math.max(14, Math.round(img.width / 70));
+      g.font = `600 ${tam}px "Chakra Petch", system-ui, sans-serif`;
+      g.fillStyle = "rgba(127,227,255,.9)";
+      g.textBaseline = "bottom";
+      g.fillText(`J.A.R.V.I.S. · OFICINA · ${fecha}`, tam, img.height - tam * 0.8);
+      const a = document.createElement("a");
+      a.download = `jarvis-oficina-${new Date().toISOString().slice(0, 16).replace(/[:T]/g, "-")}.png`;
+      a.href = c.toDataURL("image/png");
+      a.click();
+    };
+    img.src = url;
+  }, []);
+
+  const modoVoz = useCallback((m: ModoVoz) => {
+    mundo.voz = m;
+  }, [mundo]);
+
+  const alResponder = useCallback((texto: string, ok: boolean) => {
+    notas.current.set("jarvis", { tipo: ok ? "ok" : "error", texto: texto.length > 90 ? `${texto.slice(0, 87)}…` : texto, hasta: Date.now() + 12000 });
+    mundo.gesto("jarvis", ok ? "Yes" : "No", 1800);
+  }, [mundo]);
 
   const pcConectado = s.heartbeat ? Date.now() - new Date(s.heartbeat).getTime() < 3 * 60 * 1000 : false;
   const errores24h = s.runs.filter((r) => r.status === "error" && Date.now() - new Date(r.created_at).getTime() < 86400000).length;
@@ -294,6 +469,20 @@ export function OficinaView({ s }: { s: JarvisState }) {
     };
   });
 
+  const alertas = new Set(
+    plano.salas
+      .filter((sala) =>
+        s.runs.some((r) => {
+          const a = porId.get(r.agent_id);
+          return r.status === "error" && a && asignacion.get(a.slug)?.sala.slug === sala.slug && Date.now() - new Date(r.created_at).getTime() < 86400000;
+        }),
+      )
+      .map((sala) => sala.slug),
+  );
+  const proyectosHolo = s.projects
+    .filter((p) => p.slug !== "jarvis-core")
+    .map((p) => ({ slug: p.slug, tono: hash(p.slug) % 360, avance: projectProgress(p.id, s.tasks, p.progress ?? 0), activo: p.status === "activo" }));
+
   const agenteSel = seleccion ? s.agents.find((a) => a.slug === seleccion) : undefined;
   const salaSel = agenteSel ? asignacion.get(agenteSel.slug)?.sala : undefined;
   const equipoSel = agenteSel && asignacion.get(agenteSel.slug)?.lider && salaSel
@@ -308,10 +497,44 @@ export function OficinaView({ s }: { s: JarvisState }) {
           {nTrabajando} trabajando · {activos.length} agentes · {specs.length} salas
         </span>
         <div className="oficina-acciones">
-          <button className="btn btn-ghost small" onClick={() => { setSeleccion(null); setAjustar((n) => n + 1); }}>
-            Ver todo
+          <button className={`btn btn-ghost small ${tour ? "activo" : ""}`} onClick={() => setTour((x) => !x)} aria-pressed={tour} title="Recorrido automático (T)">
+            {tour ? "■ Detener tour" : "▶ Tour"}
           </button>
+          <button
+            className={`btn btn-ghost small ${sonidoOn ? "activo" : ""}`}
+            onClick={() => { const v = !sonidoOn; activarSonido(v); setSonidoOn(v); }}
+            aria-pressed={sonidoOn}
+            title="Sonidos (M)"
+          >
+            {sonidoOn ? "🔊" : "🔇"} Sonido
+          </button>
+          {hayVozSintetica() && (
+            <button
+              className={`btn btn-ghost small ${vozOn ? "activo" : ""}`}
+              onClick={() => { const v = !vozOn; activarVoz(v); setVozOn(v); if (v) hablar("Voz activada. A sus órdenes, señor.", undefined, true); }}
+              aria-pressed={vozOn}
+              title="JARVIS responde y anuncia en voz alta"
+            >
+              🗣 Voz
+            </button>
+          )}
+          <button className="btn btn-ghost small" onClick={() => setFotoClave((n) => n + 1)} title="Guardar foto de la escena (F)">📸 Foto</button>
+          <button className="btn btn-ghost small" onClick={() => setAyuda((x) => !x)} aria-expanded={ayuda} title="Atajos (?)">?</button>
         </div>
+      </div>
+      <div className="oficina-salas" role="toolbar" aria-label="Ir a una sala">
+        <button className={`chip ${salaActual === null && !tour ? "actual" : ""}`} onClick={() => irASala(null)}>
+          <kbd>0</kbd> Ver todo
+        </button>
+        {plano.salas.map((sala, i) => {
+          const n = activos.filter((a) => asignacion.get(a.slug)?.sala.slug === sala.slug && trabajando(a)).length;
+          return (
+            <button key={sala.slug} className={`chip ${salaActual === sala.slug ? "actual" : ""}`} onClick={() => irASala(sala.slug)} style={{ ["--tono" as string]: sala.tono }}>
+              {i < 9 && <kbd>{i + 1}</kbd>} {sala.nombre}
+              {n > 0 && <span className="chip-n" aria-label={`${n} trabajando`}>{n}</span>}
+            </button>
+          );
+        })}
       </div>
 
       <div className="oficina-escena">
@@ -332,10 +555,75 @@ export function OficinaView({ s }: { s: JarvisState }) {
               onSeleccionar={setSeleccion}
               enfocar={seleccion}
               ajustarClave={ajustar}
+              ambiente={ambiente}
+              proyectosHolo={proyectosHolo}
+              vuelo={vuelo}
+              tour={tour}
+              onUsuario={detenerTour}
+              alertas={alertas}
+              fotoClave={fotoClave}
+              onFoto={guardarFoto}
             />
           </Respaldo3D>
         ) : (
           <ListaRespaldo robots={robots} onElegir={setSeleccion} motivo="Este navegador no tiene 3D (WebGL) activado." />
+        )}
+        {flash && <div className="foto-flash" aria-hidden="true" />}
+        <div className="hud-registro" data-abierto={registroAbierto}>
+          <button className="hud-titulo" onClick={() => setRegistroAbierto((x) => !x)} aria-expanded={registroAbierto}>
+            <i className="hud-punto" aria-hidden="true" /> Registro de misión {registroAbierto ? "▾" : "▸"}
+          </button>
+          {registroAbierto && (
+            <ol>
+              {registro.map((ev) => (
+                <li key={ev.id} className={ev.tipo}>
+                  <span className="hud-hora">{new Date(ev.t).toLocaleTimeString("es-CO", { hour: "2-digit", minute: "2-digit" })}</span>
+                  {ev.slug ? (
+                    <button className="enlace" onClick={() => setSeleccion(ev.slug!)}>{ev.icono} {ev.texto}</button>
+                  ) : (
+                    <span>{ev.icono} {ev.texto}</span>
+                  )}
+                </li>
+              ))}
+              {registro.length === 0 && <li className="muted">Sin actividad reciente. Pídele algo a JARVIS.</li>}
+            </ol>
+          )}
+        </div>
+        <div className="hud-derecha">
+          {!compacta && (
+            <Minimapa
+              plano={plano}
+              mundo={mundo}
+              salaActual={salaActual}
+              onSala={irASala}
+              puntos={robots.map((r) => ({ slug: r.slug, color: r.esJarvis ? "#7fe3ff" : COLOR_PUNTO[r.armadura % COLOR_PUNTO.length] }))}
+            />
+          )}
+          <div className="hud-ambiente" title={`Hora y clima reales de la ciudad (${ambiente.fase}). La ciudad cambia de día, de noche y cuando llueve.`}>
+            {iconoAmbiente(ambiente)} {`${String(Math.floor(ambiente.hora)).padStart(2, "0")}:${String(Math.floor((ambiente.hora % 1) * 60)).padStart(2, "0")}`}
+            {ambiente.temperatura != null && ` · ${Math.round(ambiente.temperatura)}°C`} · {NOMBRE_CLIMA[ambiente.clima]}
+          </div>
+          {tour && <div className="hud-tour">▶ Recorrido automático · toca para detener</div>}
+        </div>
+        <ConsolaJarvis ref={consola} enviar={enviar} onModo={modoVoz} onRespuesta={alResponder} compacta={compacta} />
+        {ayuda && (
+          <div className="oficina-ayuda-modal" role="dialog" aria-label="Atajos de teclado" onClick={() => setAyuda(false)}>
+            <div className="panel" onClick={(e) => e.stopPropagation()}>
+              <div className="panel-title"><h3>Atajos</h3><button className="btn btn-ghost small" onClick={() => setAyuda(false)} aria-label="Cerrar">✕</button></div>
+              <dl className="atajos">
+                <dt><kbd>1</kbd>–<kbd>9</kbd></dt><dd>Volar a una sala</dd>
+                <dt><kbd>0</kbd></dt><dd>Ver todo el edificio</dd>
+                <dt><kbd>J</kbd></dt><dd>Ir con JARVIS</dd>
+                <dt><kbd>/</kbd></dt><dd>Escribirle a JARVIS</dd>
+                <dt><kbd>V</kbd></dt><dd>Hablarle a JARVIS (micrófono)</dd>
+                <dt><kbd>T</kbd></dt><dd>Recorrido automático</dd>
+                <dt><kbd>F</kbd></dt><dd>Foto de la escena</dd>
+                <dt><kbd>M</kbd></dt><dd>Sonido sí / no</dd>
+                <dt><kbd>Esc</kbd></dt><dd>Cerrar / soltar la cámara</dd>
+              </dl>
+              <p className="muted small">Si no tocas nada en 2 minutos empieza el recorrido solo. El micrófono usa el reconocimiento de voz de tu navegador (Chrome o Edge).</p>
+            </div>
+          </div>
         )}
         {/* Resumen para lectores de pantalla */}
         <ul className="sr-only" aria-live="polite">
@@ -358,7 +646,7 @@ export function OficinaView({ s }: { s: JarvisState }) {
         />
       )}
       <p className="muted small oficina-ayuda">
-        Toca un robot para ver qué hace · arrastra para girar · clic derecho o dos dedos para moverte · rueda o pellizco para acercar.
+        Toca un robot para ver qué hace · arrastra para girar · clic derecho o dos dedos para moverte · rueda o pellizco para acercar · <kbd>?</kbd> atajos.
       </p>
     </section>
   );
@@ -415,6 +703,7 @@ function PanelAgente({ a, sala, lider, equipo, runs, actividad, onClose, onElegi
           <b>Último trabajo:</b> {a.last_summary} <span className="muted">({ago(a.last_run_at)})</span>
         </p>
       )}
+      <Estadisticas runs={runs} />
       <p className="muted small">Gasto en las últimas {runs.length} ejecuciones: ${costo.toFixed(3)}</p>
       <ul className="oficina-historial">
         {runs.slice(0, 6).map((r) => (
@@ -427,6 +716,35 @@ function PanelAgente({ a, sala, lider, equipo, runs, actividad, onClose, onElegi
         {runs.length === 0 && <li className="muted small">Sin trabajos todavía.</li>}
       </ul>
     </aside>
+  );
+}
+
+function Estadisticas({ runs }: { runs: AgentRun[] }) {
+  const e = estadisticasDe(runs);
+  const max = Math.max(1, ...e.dias.map((d) => d.ok + d.error));
+  if (!runs.length) return null;
+  const dur = e.durMedia == null ? "—" : e.durMedia < 90 ? `${Math.round(e.durMedia)} s` : `${Math.round(e.durMedia / 60)} min`;
+  return (
+    <div className="estadisticas">
+      <svg viewBox="0 0 70 26" className="barras7" role="img" aria-label="Trabajos de los últimos 7 días">
+        {e.dias.map((d, i) => {
+          const hOk = (d.ok / max) * 20;
+          const hErr = (d.error / max) * 20;
+          return (
+            <g key={i}>
+              <rect x={i * 10 + 1} y={21 - hOk - hErr} width={7} height={Math.max(hOk, d.ok ? 1 : 0)} className="b-ok" />
+              {d.error > 0 && <rect x={i * 10 + 1} y={21 - hErr} width={7} height={hErr} className="b-err" />}
+              <rect x={i * 10 + 1} y={21} width={7} height={0.6} className="b-base" />
+              <text x={i * 10 + 4.5} y={25.6} textAnchor="middle">{d.etiqueta}</text>
+            </g>
+          );
+        })}
+      </svg>
+      <div className="est-num">
+        <span><b>{e.exito == null ? "—" : `${e.exito} %`}</b> éxito</span>
+        <span><b>{dur}</b> por trabajo</span>
+      </div>
+    </div>
   );
 }
 

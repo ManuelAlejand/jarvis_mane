@@ -51,3 +51,14 @@ export function estadoDemo(paso: number): JarvisState {
     updateTask: async () => {}, createTask: async () => {}, setAgentEnabled: async () => {}, reload: async () => {},
   } as unknown as JarvisState;
 }
+
+/** Respuestas simuladas de la consola en la demo (no llama al servidor ni gasta tokens). */
+export async function enviarDemo(texto: string): Promise<{ ok: boolean; html: string }> {
+  await new Promise((r) => setTimeout(r, 700));
+  const t = texto.toLowerCase();
+  if (t.startsWith("/estado") || t.includes("estado"))
+    return { ok: true, html: "📊 <b>Estado</b>\n• YouTube Shorts: 3 agentes trabajando\n• Auditoría GEO: activo\n• Gasto API: $0.42 de $5" };
+  if (/activo|pausa|terminad/.test(t)) return { ok: true, html: "✅ Proyecto <b>Auditoría GEO</b> → <b>activo</b> (demo)." };
+  if (t.startsWith("/ayuda")) return { ok: true, html: "Comandos: <code>/estado</code>, <code>/tareas</code>, <code>/gasto</code>, <code>/tendencias</code>" };
+  return { ok: true, html: `Entendido, señor: «${texto.replace(/[<>&]/g, "")}». <i>(Demo: en tu panel esta orden va al mismo router de Telegram.)</i>` };
+}

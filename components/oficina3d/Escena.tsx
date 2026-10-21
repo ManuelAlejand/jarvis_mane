@@ -6,7 +6,7 @@
 import { OrbitControls, Sparkles, useAnimations, useGLTF } from "@react-three/drei";
 import { Bloom, EffectComposer, Vignette } from "@react-three/postprocessing";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
-import { Suspense, useEffect, useLayoutEffect, useMemo, useRef, type ReactNode } from "react";
+import { Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, type ReactNode } from "react";
 import type React from "react";
 import * as THREE from "three";
 import { clone as clonarEsqueleto } from "three/examples/jsm/utils/SkeletonUtils.js";
@@ -15,6 +15,8 @@ import type { Anim, Mundo } from "@/lib/oficina/mundo";
 import type { Plano, Puesto, Sala } from "@/lib/oficina/plano";
 import { Ciudad } from "@/components/oficina3d/Ciudad";
 import { Mobiliario } from "@/components/oficina3d/Mobiliario";
+import { AuraJarvis, Chispas, HacesDatos, OrbitaProyectos, type ProyectoHolo } from "@/components/oficina3d/Efectos";
+import type { Ambiente } from "@/lib/oficina/ambiente";
 
 const ROBOT_URL = "/oficina3d/robot.glb";
 const ALTURA_ROBOT = 1.6;
@@ -57,6 +59,19 @@ interface Props {
   onSeleccionar: (slug: string | null) => void;
   enfocar: string | null;
   ajustarClave: number;
+  ambiente: Ambiente;
+  proyectosHolo: ProyectoHolo[];
+  /** Vuelo de cámara a una sala (slug) o a todo el edificio (null). Cambia `clave` para repetir. */
+  vuelo: { sala: string | null; clave: number };
+  /** Recorrido automático por las salas */
+  tour: boolean;
+  /** El usuario movió la cámara (para cortar el tour) */
+  onUsuario: () => void;
+  /** Salas con errores recientes (contorno rojo) */
+  alertas: Set<string>;
+  /** Pide una foto de la escena: cambia la clave y llega la imagen en onFoto */
+  fotoClave: number;
+  onFoto: (dataUrl: string) => void;
 }
 
 /** Etiquetas HTML ancladas a puntos 3D: se mueven en cada fotograma sin re-renderizar React. */
@@ -84,12 +99,9 @@ export function Escena(props: Props) {
       onPointerMissed={() => props.onSeleccionar(null)}
     >
       <color attach="background" args={["#02060d"]} />
-      <fog attach="fog" args={["#071a2b", 70, 260]} />
-      <ambientLight intensity={0.6} color="#a9d2ff" />
-      <hemisphereLight args={["#d6f0ff", "#0a1220", 0.9]} />
-      <directionalLight position={[15, 30, 22]} intensity={1.8} />
-      <directionalLight position={[-20, 15, -10]} intensity={0.5} color="#5fb8ff" />
+      <Iluminacion ambiente={props.ambiente} />
       <Contenido {...props} alta={alta} />
+      <Fotografo clave={props.fotoClave} onFoto={props.onFoto} />
       <Proyector plano={props.plano} mundo={props.mundo} anclas={anclas} />
       {alta && (
         <EffectComposer multisampling={0}>
@@ -158,12 +170,17 @@ function Proyector({ plano, mundo, anclas }: { plano: Plano; mundo: Mundo; ancla
   return null;
 }
 
-function Contenido({ plano, mundo, robots, puestosEncendidos, onSeleccionar, enfocar, ajustarClave, alta }: Props & { alta: boolean }) {
+function Contenido({ plano, mundo, robots, puestosEncendidos, onSeleccionar, enfocar, ajustarClave, alta, ambiente, proyectosHolo, vuelo, tour, onUsuario, alertas }: Props & { alta: boolean }) {
   const centro = useMemo(() => new THREE.Vector3(plano.cols / 2, 0, plano.rows / 2), [plano]);
+  const nucleo = plano.salas.find((s) => s.holo);
   return (
     <>
-      <Camara plano={plano} centro={centro} mundo={mundo} enfocar={enfocar} ajustarClave={ajustarClave} />
-      <Ciudad plano={plano} alta={alta} />
+      <Camara plano={plano} centro={centro} mundo={mundo} enfocar={enfocar} ajustarClave={ajustarClave} vuelo={vuelo} tour={tour} onUsuario={onUsuario} />
+      <Ciudad plano={plano} alta={alta} ambiente={ambiente} />
+      <HacesDatos plano={plano} encendidos={puestosEncendidos} />
+      <Chispas mundo={mundo} />
+      <AuraJarvis mundo={mundo} />
+      {nucleo?.holo && <OrbitaProyectos x={nucleo.holo.c + 1} z={nucleo.holo.r + 1} proyectos={proyectosHolo} />}
       <Suelo plano={plano} />
       <Paredes plano={plano} />
       {plano.salas.map((s) => (
@@ -172,6 +189,7 @@ function Contenido({ plano, mundo, robots, puestosEncendidos, onSeleccionar, enf
             <Escritorio key={i} puesto={p} encendido={puestosEncendidos.has(p)} nucleo={s.tipo === "nucleo"} />
           ))}
           <Mobiliario sala={s} />
+          {alertas.has(s.slug) && <AlertaSala sala={s} />}
           {s.holo && <MesaHolografica sala={s} />}
           {s.holo && (
             <Sparkles count={alta ? 60 : 25} scale={[5, 2.5, 5]} size={2.5} speed={0.35} color="#7fe3ff" position={[s.holo.c + 1, 1.5, s.holo.r + 1]} />
@@ -194,34 +212,129 @@ function MotorMundo({ mundo }: { mundo: Mundo }) {
   return null;
 }
 
-function Camara({ plano, centro, mundo, enfocar, ajustarClave }: { plano: Plano; centro: THREE.Vector3; mundo: Mundo; enfocar: string | null; ajustarClave: number }) {
+const suavizar = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
+
+interface Vuelo {
+  dPos: THREE.Vector3;
+  dObj: THREE.Vector3;
+  hPos: THREE.Vector3;
+  hObj: THREE.Vector3;
+  t0: number;
+  dur: number;
+}
+
+function Camara({ plano, centro, mundo, enfocar, ajustarClave, vuelo, tour, onUsuario }: {
+  plano: Plano; centro: THREE.Vector3; mundo: Mundo; enfocar: string | null; ajustarClave: number;
+  vuelo: { sala: string | null; clave: number }; tour: boolean; onUsuario: () => void;
+}) {
   const controles = useRef<OrbitImpl>(null);
   const { camera, size } = useThree();
   const siguiendo = useRef<string | null>(null);
+  const animando = useRef<Vuelo | null>(null);
+  const primera = useRef(true);
+  const tourPaso = useRef({ i: 0, hasta: 0 });
 
-  // Encuadre inicial: todo el edificio visible desde arriba y en diagonal
+  /** Posición de cámara que encuadra un rectángulo del plano (centro y medidas en celdas). */
+  const encuadre = useCallback(
+    (cx: number, cz: number, w: number, h: number, dir: THREE.Vector3, margen: number) => {
+      const persp = camera as THREE.PerspectiveCamera;
+      const aspecto = size.width / Math.max(1, size.height);
+      const mediaV = THREE.MathUtils.degToRad(persp.fov / 2);
+      const d = Math.max(w / 2 / (Math.tan(mediaV) * aspecto), h / 2 / Math.tan(mediaV)) * margen;
+      const objetivo = new THREE.Vector3(cx, 0, cz);
+      return { pos: objetivo.clone().addScaledVector(dir.clone().normalize(), d), objetivo };
+    },
+    [camera, size.width, size.height],
+  );
+
+  const volar = useCallback(
+    (pos: THREE.Vector3, objetivo: THREE.Vector3, dur = 1.4) => {
+      const c = controles.current;
+      if (!c) return;
+      animando.current = { dPos: camera.position.clone(), dObj: c.target.clone(), hPos: pos, hObj: objetivo, t0: performance.now(), dur: dur * 1000 };
+    },
+    [camera],
+  );
+
+  const vistaGeneral = useCallback(
+    () => encuadre(plano.cols / 2, plano.rows / 2, plano.cols * 1.12, plano.rows * 1.15, new THREE.Vector3(0, 0.82, 0.86), 1.02),
+    [encuadre, plano],
+  );
+
+  const vistaSala = useCallback(
+    (slug: string) => {
+      const s = plano.salas.find((x) => x.slug === slug);
+      if (!s) return null;
+      return encuadre(s.c0 + s.w / 2, s.r0 + s.h / 2, s.w * 1.1, s.h * 1.15, new THREE.Vector3(0.18, 0.95, 0.8), 1.08);
+    },
+    [encuadre, plano],
+  );
+
+  // Encuadre inicial (inmediato) y "Ver todo" (en vuelo)
   useEffect(() => {
-    const persp = camera as THREE.PerspectiveCamera;
-    const aspecto = size.width / Math.max(1, size.height);
-    const mediaV = THREE.MathUtils.degToRad(persp.fov / 2);
-    const ancho = plano.cols * 1.12;
-    const fondo = plano.rows * 1.15;
-    const d = Math.max(ancho / 2 / (Math.tan(mediaV) * aspecto), fondo / 2 / Math.tan(mediaV)) * 1.02;
-    const dir = new THREE.Vector3(0, 0.82, 0.86).normalize(); // más horizonte: se ven las torres del fondo
-    camera.position.copy(centro).addScaledVector(dir, d);
-    controles.current?.target.copy(centro);
-    controles.current?.update();
+    const { pos, objetivo } = vistaGeneral();
     siguiendo.current = null;
-  }, [camera, size.width, size.height, plano, centro, ajustarClave]);
+    if (primera.current) {
+      primera.current = false;
+      camera.position.copy(pos);
+      controles.current?.target.copy(objetivo);
+      controles.current?.update();
+      return;
+    }
+    volar(pos, objetivo);
+  }, [camera, vistaGeneral, volar, ajustarClave, centro]);
+
+  // Vuelo a una sala pedido desde los botones, el minimapa o el teclado
+  useEffect(() => {
+    if (!vuelo.clave) return;
+    siguiendo.current = null;
+    const v = vuelo.sala ? vistaSala(vuelo.sala) : vistaGeneral();
+    if (v) volar(v.pos, v.objetivo);
+  }, [vuelo.clave, vuelo.sala, vistaSala, vistaGeneral, volar]);
 
   useEffect(() => {
     siguiendo.current = enfocar;
   }, [enfocar]);
 
-  useFrame(() => {
+  useEffect(() => {
+    tourPaso.current = { i: 0, hasta: 0 };
+  }, [tour]);
+
+  useFrame((_, dt) => {
     const c = controles.current;
+    if (!c) return;
+    const a = animando.current;
+    if (a) {
+      const t = Math.min(1, (performance.now() - a.t0) / a.dur);
+      const k = suavizar(t);
+      camera.position.lerpVectors(a.dPos, a.hPos, k);
+      // arco: sube un poco a mitad de camino (se siente como un vuelo)
+      camera.position.y += Math.sin(k * Math.PI) * a.dPos.distanceTo(a.hPos) * 0.12;
+      c.target.lerpVectors(a.dObj, a.hObj, k);
+      c.update();
+      if (t >= 1) animando.current = null;
+      return;
+    }
+    if (tour) {
+      // Recorrido: cada 9 s a la siguiente sala (y al final, la vista general), girando despacio
+      const ahora = performance.now();
+      if (ahora > tourPaso.current.hasta) {
+        const lista = [...plano.salas.map((s) => s.slug), null];
+        const slug = lista[tourPaso.current.i % lista.length];
+        tourPaso.current = { i: tourPaso.current.i + 1, hasta: ahora + 9000 };
+        const v = slug ? vistaSala(slug) : vistaGeneral();
+        if (v) volar(v.pos, v.objetivo, 2.2);
+        return;
+      }
+      const giro = dt * 0.07;
+      const rel = camera.position.clone().sub(c.target);
+      rel.applyAxisAngle(new THREE.Vector3(0, 1, 0), giro);
+      camera.position.copy(c.target).add(rel);
+      c.update();
+      return;
+    }
     const slug = siguiendo.current;
-    if (!c || !slug) return;
+    if (!slug) return;
     const r = mundo.robots.get(slug);
     if (!r) return;
     const objetivo = new THREE.Vector3(r.x, 0.6, r.z);
@@ -243,9 +356,66 @@ function Camara({ plano, centro, mundo, enfocar, ajustarClave }: { plano: Plano;
       maxPolarAngle={1.2}
       minDistance={4}
       maxDistance={100}
-      onStart={() => (siguiendo.current = null)}
+      onStart={() => {
+        siguiendo.current = null;
+        animando.current = null;
+        onUsuario();
+      }}
     />
   );
+}
+
+/** Luces que siguen la hora del día y el clima. */
+function Iluminacion({ ambiente }: { ambiente: Ambiente }) {
+  const amb = useRef<THREE.AmbientLight>(null);
+  const hemi = useRef<THREE.HemisphereLight>(null);
+  const sol = useRef<THREE.DirectionalLight>(null);
+  const niebla = useMemo(() => new THREE.Fog("#071a2b", 70, 260), []);
+  const { scene } = useThree();
+  useEffect(() => {
+    scene.fog = niebla;
+    return () => {
+      scene.fog = null;
+    };
+  }, [scene, niebla]);
+  const nieblaNoche = useMemo(() => new THREE.Color("#071a2b"), []);
+  const nieblaDia = useMemo(() => new THREE.Color("#4a7690"), []);
+  const tmp = useMemo(() => new THREE.Color(), []);
+  useFrame((_, dt) => {
+    const k = Math.min(1, dt * 1.5);
+    const l = ambiente.luz;
+    const gris = ambiente.clima === "lluvia" || ambiente.clima === "tormenta" || ambiente.clima === "niebla" ? 0.7 : ambiente.clima === "nublado" ? 0.85 : 1;
+    if (amb.current) amb.current.intensity += (0.6 + l * 0.35 - amb.current.intensity) * k;
+    if (hemi.current) hemi.current.intensity += (0.9 + l * 0.5 - hemi.current.intensity) * k;
+    if (sol.current) sol.current.intensity += ((1.8 + l * 0.9) * gris - sol.current.intensity) * k;
+    niebla.color.lerp(tmp.copy(nieblaNoche).lerp(nieblaDia, l * 0.8), k);
+    const lejos = ambiente.clima === "niebla" ? 140 : ambiente.clima === "lluvia" || ambiente.clima === "tormenta" ? 190 : 260;
+    niebla.far += (lejos - niebla.far) * k;
+  });
+  return (
+    <>
+      <ambientLight ref={amb} intensity={0.6} color="#a9d2ff" />
+      <hemisphereLight ref={hemi} args={["#d6f0ff", "#0a1220", 0.9]} />
+      <directionalLight ref={sol} position={[15, 30, 22]} intensity={1.8} />
+      <directionalLight position={[-20, 15, -10]} intensity={0.5} color="#5fb8ff" />
+    </>
+  );
+}
+
+/** Saca una foto de la escena tal como se ve (sin las etiquetas HTML). */
+function Fotografo({ clave, onFoto }: { clave: number; onFoto: (url: string) => void }) {
+  const { gl, scene, camera } = useThree();
+  useEffect(() => {
+    if (!clave) return;
+    try {
+      gl.render(scene, camera);
+      onFoto(gl.domElement.toDataURL("image/png"));
+    } catch {
+      /* el navegador no dejó leer el lienzo */
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clave]);
+  return null;
 }
 
 function Suelo({ plano }: { plano: Plano }) {
@@ -560,12 +730,7 @@ function RobotAgente({ info, mundo, onSeleccionar }: { info: InfoRobot; mundo: M
         </mesh>
       )}
       {info.lider && <InsigniaLider alto={ALTURA_ROBOT} />}
-      {info.seleccionado && (
-        <mesh rotation-x={-Math.PI / 2} position={[0, 0.03, 0]}>
-          <ringGeometry args={[0.45, 0.55, 40]} />
-          <meshBasicMaterial color="#e8b04b" />
-        </mesh>
-      )}
+      {info.seleccionado && <Reticula />}
     </group>
   );
 }
@@ -600,6 +765,52 @@ function RelojHolograma() {
     reloj.value = clock.elapsedTime;
   });
   return null;
+}
+
+/** Retícula estilo HUD alrededor del agente seleccionado: anillo dorado y cuatro esquinas que giran. */
+function Reticula() {
+  const g = useRef<THREE.Group>(null);
+  useFrame(({ clock }) => {
+    if (!g.current) return;
+    g.current.rotation.y = clock.elapsedTime * 0.8;
+    const k = 1 + Math.sin(clock.elapsedTime * 3) * 0.05;
+    g.current.scale.set(k, 1, k);
+  });
+  return (
+    <group ref={g} position={[0, 0.03, 0]}>
+      <mesh rotation-x={-Math.PI / 2}>
+        <ringGeometry args={[0.5, 0.54, 48]} />
+        <meshBasicMaterial color="#e8b04b" toneMapped={false} />
+      </mesh>
+      {[0, 1, 2, 3].map((i) => (
+        <mesh key={i} rotation-x={-Math.PI / 2} rotation-z={(i * Math.PI) / 2}>
+          <ringGeometry args={[0.66, 0.74, 16, 1, -0.25, 0.5]} />
+          <meshBasicMaterial color="#ffd36b" toneMapped={false} transparent opacity={0.9} />
+        </mesh>
+      ))}
+    </group>
+  );
+}
+
+/** Contorno rojo que late en el suelo de las salas con errores en las últimas 24 h. */
+function AlertaSala({ sala }: { sala: Sala }) {
+  const mat = useRef<THREE.LineBasicMaterial>(null);
+  const geo = useMemo(() => {
+    const m = 0.15;
+    const x0 = sala.c0 + m, x1 = sala.c0 + sala.w - m, z0 = sala.r0 + m, z1 = sala.r0 + sala.h - m;
+    const pts = [x0, 0.03, z0, x1, 0.03, z0, x1, 0.03, z0, x1, 0.03, z1, x1, 0.03, z1, x0, 0.03, z1, x0, 0.03, z1, x0, 0.03, z0];
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.Float32BufferAttribute(pts, 3));
+    return g;
+  }, [sala]);
+  useFrame(({ clock }) => {
+    if (mat.current) mat.current.opacity = 0.35 + (Math.sin(clock.elapsedTime * 3) + 1) * 0.3;
+  });
+  return (
+    <lineSegments geometry={geo}>
+      <lineBasicMaterial ref={mat} color="#ff4d3d" transparent toneMapped={false} />
+    </lineSegments>
+  );
 }
 
 /** Rombo dorado flotando sobre la cabeza de los líderes de sala */

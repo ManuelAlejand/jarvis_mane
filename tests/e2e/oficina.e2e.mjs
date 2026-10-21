@@ -14,12 +14,12 @@ const b = await chromium.launch({
   args: ["--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"],
 });
 
-async function abrir(viewport) {
-  const p = await b.newPage({ viewport });
+async function abrir(viewport, query = "") {
+  const p = await b.newPage({ viewport, acceptDownloads: true });
   const errores = [];
   p.on("pageerror", (e) => errores.push(e.message));
   p.on("console", (m) => { if (m.type() === "error" && !/Failed to load resource|fonts\.googleapis/.test(m.text())) errores.push(m.text()); });
-  await p.goto(`${BASE}/demo/oficina`);
+  await p.goto(`${BASE}/demo/oficina${query}`);
   await p.waitForSelector(".oficina-escena canvas", { timeout: 30000 });
   await p.waitForFunction(() => document.querySelectorAll(".oficina-capa .nombre").length >= 9, null, { timeout: 30000 });
   await p.waitForTimeout(2500);
@@ -98,6 +98,81 @@ async function abrir(viewport) {
   await p.close();
 }
 
+// ── PC: navegación, consola de JARVIS, HUD, foto, ambiente (v2)
+{
+  const { p, errores } = await abrir({ width: 1440, height: 900 }, "?hora=13&clima=lluvia");
+  const canvas = await p.$(".oficina-escena canvas");
+  ok("Muestra el minimapa con todos los agentes", (await p.$$(".minimapa .mm-robot")).length === 9);
+  ok("El ambiente refleja la hora y el clima pedidos", ((await p.textContent(".hud-ambiente")) ?? "").includes("lluvia"), await p.textContent(".hud-ambiente"));
+  ok("El registro de misión lista eventos", (await p.$$(".hud-registro li")).length >= 1);
+
+  const antes = hash(await canvas.screenshot());
+  await p.click(".oficina-salas .chip:has-text('YouTube Shorts')");
+  await p.waitForTimeout(2200);
+  ok("Los botones de sala vuelan la cámara a esa sala", hash(await canvas.screenshot()) !== antes && (await p.$(".oficina-salas .chip.actual:has-text('YouTube')")) !== null);
+  const enSala = hash(await canvas.screenshot());
+  await p.keyboard.press("2");
+  await p.waitForTimeout(2200);
+  ok("El atajo de teclado 2 vuela a la segunda sala", hash(await canvas.screenshot()) !== enSala && (await p.$(".oficina-salas .chip.actual:has-text('Auditor')")) !== null);
+  await p.click(".minimapa .mm-sala.nucleo");
+  await p.waitForTimeout(1500);
+  ok("Clic en el minimapa vuela a la sala", (await p.$(".oficina-salas .chip.actual:has-text('Núcleo')")) !== null);
+
+  await p.keyboard.press("?");
+  ok("«?» abre la ayuda de atajos", (await p.$(".oficina-ayuda-modal")) !== null);
+  await p.keyboard.press("Escape");
+  ok("Esc cierra la ayuda", (await p.$(".oficina-ayuda-modal")) === null);
+
+  await p.fill(".consola-fila input", "/estado");
+  await p.press(".consola-fila input", "Enter");
+  await p.waitForSelector(".consola-msgs p.jarvis", { timeout: 8000 });
+  ok("La consola manda la orden y JARVIS responde", ((await p.textContent(".consola-msgs p.jarvis")) ?? "").includes("Estado"));
+  let globoJarvis = false;
+  for (let i = 0; i < 10 && !globoJarvis; i++) {
+    globoJarvis = await p.$$eval(".oficina-capa .agente-capa", (els) => els.some((e) => e.querySelector(".nombre.jarvis") && e.querySelector(".globo")?.textContent?.includes("Estado")));
+    if (!globoJarvis) await p.waitForTimeout(300);
+  }
+  ok("La respuesta aparece en el globo de JARVIS", globoJarvis);
+  await p.fill(".consola-fila input", "<img src=x onerror=alert(1)>");
+  await p.press(".consola-fila input", "Enter");
+  await p.waitForTimeout(1200);
+  ok("La consola no ejecuta HTML del usuario", (await p.$(".consola-msgs img")) === null);
+
+  await p.locator(".hud-registro .enlace").first().click();
+  await p.waitForSelector(".oficina-panel h3", { timeout: 5000 });
+  ok("Clic en el registro abre el agente", true);
+  ok("El panel muestra las estadísticas de 7 días", (await p.$(".oficina-panel .estadisticas svg")) !== null);
+  await p.click(".oficina-panel button[aria-label='Cerrar']");
+
+  const descarga = p.waitForEvent("download", { timeout: 30000 }).catch(() => null);
+  await p.keyboard.press("f", { noWaitAfter: true });
+  const d = await descarga;
+  const ruta = d ? await d.path() : null;
+  const { statSync } = await import("node:fs");
+  const peso = ruta ? statSync(ruta).size : 0;
+  ok("La foto de la escena se descarga (con imagen, no en blanco)", !!d && d.suggestedFilename().startsWith("jarvis-oficina-") && peso > 60000, `${d?.suggestedFilename() ?? "sin descarga"} · ${Math.round(peso / 1024)} KB`);
+  if (ruta && process.env.CAPTURA_FOTO) (await import("node:fs")).copyFileSync(ruta, process.env.CAPTURA_FOTO);
+
+  await p.click("text=▶ Tour");
+  await p.waitForTimeout(400);
+  ok("El tour automático se enciende", (await p.$(".hud-tour")) !== null);
+  const t1 = hash(await canvas.screenshot());
+  await p.waitForTimeout(2500);
+  ok("El tour mueve la cámara solo", hash(await canvas.screenshot()) !== t1);
+  const cb = await canvas.boundingBox();
+  await p.mouse.move(cb.x + 300, cb.y + 300);
+  await p.mouse.down();
+  await p.mouse.move(cb.x + 360, cb.y + 320, { steps: 4 });
+  await p.mouse.up();
+  await p.waitForTimeout(300);
+  ok("Arrastrar la cámara detiene el tour", (await p.$(".hud-tour")) === null);
+  await p.click(".oficina-salas .chip:has-text('Ver todo')");
+  await p.waitForTimeout(2000);
+  ok("Sin errores de JavaScript con las funciones nuevas", errores.length === 0, errores.slice(0, 3).join(" | "));
+  await p.screenshot({ path: process.env.CAPTURA_LLUVIA ?? "/tmp/oficina-lluvia.png" });
+  await p.close();
+}
+
 // ── Celular en horizontal
 {
   const { p, errores } = await abrir({ width: 844, height: 390 });
@@ -105,6 +180,7 @@ async function abrir(viewport) {
   const fpsMovil = await p.evaluate(() => new Promise((res) => { let n = 0; const t0 = performance.now(); const f = () => { n++; if (performance.now() - t0 < 2000) requestAnimationFrame(f); else res(n / 2); }; requestAnimationFrame(f); }));
   ok("En celular también se anima (versión ligera, sin brillo)", fpsMovil >= 1.5, `${fpsMovil.toFixed(1)} fps con GPU por software`);
   ok("En celular horizontal la escena ocupa la pantalla", caja.height >= 250 && caja.width >= 780, `${Math.round(caja.width)}×${Math.round(caja.height)}`);
+  ok("En celular la consola de JARVIS empieza recogida", (await p.$(".consola-jarvis-boton")) !== null);
   ok("Sin errores de JavaScript en celular", errores.length === 0, errores.slice(0, 3).join(" | "));
   await p.screenshot({ path: process.env.CAPTURA_MOVIL ?? "/tmp/oficina-movil.png" });
   await p.close();

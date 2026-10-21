@@ -2,7 +2,7 @@
 // Demostración pública de la Oficina 3D con datos simulados (no usa la base de datos).
 import dynamic from "next/dynamic";
 import { useEffect, useState } from "react";
-import { estadoDemo } from "@/components/oficina3d/demo";
+import { enviarDemo, estadoDemo } from "@/components/oficina3d/demo";
 
 const OficinaView = dynamic(() => import("@/components/OficinaView").then((m) => m.OficinaView), { ssr: false });
 
@@ -17,7 +17,7 @@ export default function DemoOficina() {
       <p className="muted small" style={{ margin: "0 0 8px" }} data-paso={paso}>
         Demostración con datos simulados · paso {paso}
       </p>
-      <OficinaView s={estadoDemo(paso)} />
+      <OficinaView s={estadoDemo(paso)} enviar={enviarDemo} />
     </main>
   );
 }

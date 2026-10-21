@@ -5,6 +5,7 @@
  * Es solo fondo: nada se puede tocar (raycast desactivado) y se genera siempre igual (semilla fija).
  */
 import { Stars } from "@react-three/drei";
+import type { Ambiente } from "@/lib/oficina/ambiente";
 import { useFrame } from "@react-three/fiber";
 import { useLayoutEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
@@ -102,27 +103,41 @@ function generarEdificios(plano: Plano, cantidadMax: number): Edificio[] {
   return out.slice(0, cantidadMax);
 }
 
-export function Ciudad({ plano, alta }: { plano: Plano; alta: boolean }) {
+export function Ciudad({ plano, alta, ambiente }: { plano: Plano; alta: boolean; ambiente: Ambiente }) {
   const edificios = useMemo(() => generarEdificios(plano, alta ? 320 : 170), [plano, alta]);
   const cx = plano.cols / 2;
   const cz = plano.rows / 2;
   return (
     <group>
-      <Cielo />
-      <Stars radius={260} depth={60} count={alta ? 1500 : 700} factor={4} saturation={0} fade speed={0.4} />
-      <SueloCiudad cx={cx} cz={cz} />
+      <Cielo ambiente={ambiente} />
+      {ambiente.luz < 0.6 && ambiente.clima !== "tormenta" && (
+        <Stars radius={260} depth={60} count={alta ? 1500 : 700} factor={4} saturation={0} fade speed={0.4} />
+      )}
+      <SolLuna ambiente={ambiente} cx={cx} cz={cz} />
+      <SueloCiudad cx={cx} cz={cz} luz={ambiente.luz} />
       <Plataforma plano={plano} />
-      <Rascacielos edificios={edificios} />
+      <Rascacielos edificios={edificios} luz={ambiente.luz} />
       <Balizas edificios={edificios} />
       <Vehiculos cx={cx} cz={cz} cantidad={alta ? 26 : 12} />
       <Anuncios cx={cx} cz={cz} plano={plano} />
       <TorresEmblematicas plano={plano} />
+      {(ambiente.clima === "lluvia" || ambiente.clima === "tormenta") && <Lluvia plano={plano} cantidad={alta ? 2600 : 900} fuerte={ambiente.clima === "tormenta"} />}
     </group>
   );
 }
 
 /** Cúpula con degradado: azul noche arriba y un resplandor cian/ámbar en el horizonte. */
-function Cielo() {
+function Cielo({ ambiente }: { ambiente: Ambiente }) {
+  const destino = useMemo(() => ambiente.cielo.map((c) => new THREE.Color(c)), [ambiente.cielo]);
+  // Transición suave entre colores (el cambio de hora o de clima no salta de golpe)
+  useFrame((_, dt) => {
+    const u = mat.uniforms;
+    const k = Math.min(1, dt * 1.5);
+    u.cArriba.value.lerp(destino[0], k);
+    u.cMedio.value.lerp(destino[1], k);
+    u.cHorizonte.value.lerp(destino[2], k);
+    u.cBrillo.value.lerp(destino[3], k);
+  });
   const mat = useMemo(
     () =>
       new THREE.ShaderMaterial({
@@ -157,7 +172,15 @@ function Cielo() {
 }
 
 /** Suelo de la ciudad con calles y avenidas luminosas. */
-function SueloCiudad({ cx, cz }: { cx: number; cz: number }) {
+const SUELO_NOCHE = new THREE.Color("#03080e");
+const SUELO_DIA = new THREE.Color("#22384a");
+
+function SueloCiudad({ cx, cz, luz }: { cx: number; cz: number; luz: number }) {
+  const suelo = useRef<THREE.MeshBasicMaterial>(null);
+  const tmp = useMemo(() => new THREE.Color(), []);
+  useFrame((_, dt) => {
+    suelo.current?.color.lerp(tmp.copy(SUELO_NOCHE).lerp(SUELO_DIA, luz), Math.min(1, dt * 1.5));
+  });
   const { calles, avenidas } = useMemo(() => {
     const c: number[] = [];
     const a: number[] = [];
@@ -178,7 +201,7 @@ function SueloCiudad({ cx, cz }: { cx: number; cz: number }) {
     <group position={[0, SUELO_Y + 0.01, 0]}>
       <mesh rotation-x={-Math.PI / 2} position={[cx, -0.01, cz]} raycast={sinClic}>
         <planeGeometry args={[600, 600]} />
-        <meshBasicMaterial color="#03080e" />
+        <meshBasicMaterial ref={suelo} color="#03080e" />
       </mesh>
       <lineSegments geometry={calles} raycast={sinClic}>
         <lineBasicMaterial color="#1b5f7a" transparent opacity={0.45} />
@@ -215,7 +238,7 @@ function Plataforma({ plano }: { plano: Plano }) {
   );
 }
 
-function Rascacielos({ edificios }: { edificios: Edificio[] }) {
+function Rascacielos({ edificios, luz }: { edificios: Edificio[]; luz: number }) {
   const mats = useMemo(() => {
     const ventanas = [texturaVentanas(7), texturaVentanas(11)];
     return ventanas.map((tex) => {
@@ -236,6 +259,14 @@ function Rascacielos({ edificios }: { edificios: Edificio[] }) {
       return m;
     });
   }, []);
+  // De día las ventanas brillan menos y las fachadas se ven más claras
+  useFrame((_, dt) => {
+    const k = Math.min(1, dt * 1.5);
+    for (const m of mats) {
+      m.emissiveIntensity += (1.25 - luz * 0.75 - m.emissiveIntensity) * k;
+      m.color.lerp(FACHADA_TMP.copy(FACHADA_NOCHE).lerp(FACHADA_DIA, luz), k);
+    }
+  });
   // Dos grupos con texturas distintas para que no se vean iguales
   const grupos = useMemo(() => [edificios.filter((_, i) => i % 2 === 0), edificios.filter((_, i) => i % 2 === 1)], [edificios]);
   return (
@@ -605,6 +636,108 @@ function Cupula({ x, z }: { x: number; z: number }) {
         <cylinderGeometry args={[0.5, 0.8, 5, 12]} />
         <Luz color="#e8b04b" intensidad={1.6} />
       </mesh>
+    </group>
+  );
+}
+
+const FACHADA_NOCHE = new THREE.Color("#0b1724");
+const FACHADA_DIA = new THREE.Color("#7f9bb4");
+const FACHADA_TMP = new THREE.Color();
+
+/** Sol de día y luna de noche, recorriendo un arco detrás de las torres según la hora real. */
+function SolLuna({ ambiente, cx, cz }: { ambiente: Ambiente; cx: number; cz: number }) {
+  const dia = ambiente.hora >= 6 && ambiente.hora < 18;
+  // 6 h → horizonte izquierdo, 12 h → arriba, 18 h → horizonte derecho (igual la luna de 18 a 6)
+  const t = (((dia ? ambiente.hora - 6 : ambiente.hora - 18 + 24) % 24) / 12) * Math.PI;
+  const R = 330;
+  const x = cx - Math.cos(t) * R * 0.75;
+  const y = Math.max(-20, Math.sin(t) * R * 0.55) + 10;
+  const z = cz - R * 0.62;
+  const oculto = ambiente.clima === "tormenta" || ambiente.clima === "lluvia" || ambiente.clima === "niebla";
+  const halo = useMemo(
+    () =>
+      new THREE.ShaderMaterial({
+        transparent: true,
+        depthWrite: false,
+        fog: false,
+        blending: THREE.AdditiveBlending,
+        uniforms: { uColor: { value: new THREE.Color() } },
+        vertexShader: "varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }",
+        fragmentShader: "uniform vec3 uColor; varying vec2 vUv; void main(){ float d = length(vUv-0.5)*2.0; float a = smoothstep(1.0,0.0,d); a = a*a*0.55 + smoothstep(0.24,0.2,d); gl_FragColor = vec4(uColor*a, a); }",
+      }),
+    [],
+  );
+  halo.uniforms.uColor.value.set(dia ? (ambiente.fase === "dia" ? "#fff1c9" : "#ffb35c") : "#cfe6ff");
+  const ref = useRef<THREE.Mesh>(null);
+  useFrame(({ camera }) => ref.current?.quaternion.copy(camera.quaternion));
+  if (oculto) return null;
+  return (
+    <mesh ref={ref} position={[x, y, z]} material={halo} raycast={sinClic} renderOrder={-1}>
+      <planeGeometry args={[dia ? 90 : 60, dia ? 90 : 60]} />
+    </mesh>
+  );
+}
+
+/**
+ * Lluvia sobre la ciudad (cuando llueve de verdad): segmentos que caen en la GPU (sin trabajo por fotograma
+ * en la CPU). No llueve dentro de la oficina: tiene techo de cristal invisible.
+ */
+function Lluvia({ plano, cantidad, fuerte }: { plano: Plano; cantidad: number; fuerte: boolean }) {
+  const { geo, mat } = useMemo(() => {
+    const r = azar(99);
+    const pos: number[] = [];
+    const ext: number[] = [];
+    const cx = plano.cols / 2;
+    const cz = plano.rows / 2;
+    let n = 0;
+    while (n < cantidad) {
+      const x = cx + (r() - 0.5) * 220;
+      const z = cz + (r() - 0.5) * 220;
+      if (x > -3 && x < plano.cols + 3 && z > -3 && z < plano.rows + 3) continue;
+      const y = r() * 70;
+      pos.push(x, y, z, x, y, z);
+      ext.push(0, 1);
+      n++;
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+    g.setAttribute("extremo", new THREE.Float32BufferAttribute(ext, 1));
+    const m = new THREE.ShaderMaterial({
+      transparent: true,
+      depthWrite: false,
+      uniforms: { uT: { value: 0 }, uVel: { value: fuerte ? 42 : 30 }, uAlpha: { value: fuerte ? 0.55 : 0.4 } },
+      vertexShader: `
+        attribute float extremo; uniform float uT; uniform float uVel; varying float vA;
+        void main(){
+          vec3 p = position;
+          p.y = mod(p.y - uT * uVel, 70.0) - 6.0;
+          p.y += extremo * 1.1; p.x += extremo * 0.12;
+          vA = extremo;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
+        }`,
+      fragmentShader: "uniform float uAlpha; varying float vA; void main(){ gl_FragColor = vec4(0.65, 0.85, 1.0, uAlpha * (0.3 + vA)); }",
+    });
+    return { geo: g, mat: m };
+  }, [plano, cantidad, fuerte]);
+  const destello = useRef<THREE.PointLight>(null);
+  const proximo = useRef(0);
+  useFrame(({ clock }) => {
+    mat.uniforms.uT.value = clock.elapsedTime;
+    // Relámpagos en tormenta: un destello breve cada pocos segundos
+    const l = destello.current;
+    if (!l) return;
+    const t = clock.elapsedTime;
+    if (fuerte && t > proximo.current) {
+      proximo.current = t + 4 + Math.random() * 8;
+      l.position.set(plano.cols / 2 + (Math.random() - 0.5) * 200, 90, plano.rows / 2 - 140 - Math.random() * 60);
+      l.intensity = 900;
+    }
+    l.intensity *= 0.86;
+  });
+  return (
+    <group>
+      <lineSegments geometry={geo} material={mat} raycast={sinClic} frustumCulled={false} />
+      {fuerte && <pointLight ref={destello} color="#cfe6ff" intensity={0} distance={400} decay={1} />}
     </group>
   );
 }

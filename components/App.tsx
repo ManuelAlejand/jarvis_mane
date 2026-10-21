@@ -6,6 +6,7 @@ import { useJarvis } from "@/components/useJarvis";
 import { ActivityView, ConsoleView, HudView, KanbanView, ProjectsView } from "@/components/views";
 import { AgentsView } from "@/components/AgentsView";
 import dynamic from "next/dynamic";
+import { enviarComando } from "@/components/oficina3d/comando";
 
 // La oficina usa canvas y window: solo en el navegador
 const OficinaView = dynamic(() => import("@/components/OficinaView").then((m) => m.OficinaView), { ssr: false });
@@ -110,7 +111,7 @@ function Shell({ userId, email }: { userId: string; email: string }) {
         ) : view === "kanban" ? (
           <KanbanView s={s} />
         ) : view === "oficina" ? (
-          <OficinaView s={s} />
+          <OficinaView s={s} enviar={enviarComando} />
         ) : view === "agentes" ? (
           <AgentsView s={s} />
         ) : view === "actividad" ? (

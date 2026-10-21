@@ -46,8 +46,23 @@ const TEXTO_DESCANSO: Record<Descanso["tipo"], string> = {
   baile: "Bailando en la pista 🎶",
 };
 
+/** Estado de la voz de JARVIS (lo dibuja el aura del holograma) */
+export type ModoVoz = "normal" | "escuchando" | "pensando" | "hablando";
+
+/** Efecto visual de un solo uso: chispas al terminar, destello rojo al fallar, pulso al entregar */
+export interface Efecto {
+  id: number;
+  tipo: "ok" | "error" | "entrega";
+  x: number;
+  z: number;
+  t0: number;
+}
+
 export class Mundo {
   robots = new Map<string, Robot>();
+  voz: ModoVoz = "normal";
+  efectos: Efecto[] = [];
+  private nEfecto = 0;
   /** Velocidad del reloj de descansos (las pruebas la aceleran) */
   constructor(public plano: Plano, private opciones: { descansoMs?: [number, number]; pausaMs?: [number, number] } = {}) {}
 
@@ -102,6 +117,14 @@ export class Mundo {
     }
   }
 
+  /** Lanza un efecto sobre un agente (las chispas duran ~2 s; se guardan como mucho 24). */
+  efecto(tipo: Efecto["tipo"], slug: string) {
+    const r = this.robots.get(slug);
+    if (!r) return;
+    this.efectos.push({ id: ++this.nEfecto, tipo, x: r.x, z: r.z, t0: performance.now() });
+    if (this.efectos.length > 24) this.efectos.shift();
+  }
+
   gesto(slug: string, anim: Anim, ms = 2600) {
     const r = this.robots.get(slug);
     if (r) r.gesto = { anim, hasta: performance.now() + ms };
@@ -120,6 +143,7 @@ export class Mundo {
     a.llevando = true;
     this.ir(a, b.puesto.entrega, () => {
       a.llevando = false;
+      this.efecto("entrega", para);
       a.rot = Math.atan2(centro(b.puesto.silla).x - a.x, centro(b.puesto.silla).z - a.z);
       this.gesto(de, "Wave", 2200);
       this.gesto(para, "Yes", 1800);
