@@ -66,6 +66,7 @@ const HELP = [
   "/reintentar V1 — relanzar un Short que falló",
   "/agente investigador busca nichos de misterio — darle una orden",
   "/agente radar explora nichos y locales para la Auditoría GEO en Bogotá — Radar (en tu PC, 0 USD)",
+  "/informe critico — el último informe completo de un agente (resumen + archivo)",
   "/agente critico valida la idea de la Auditoría GEO — Crítico: clientes simulados y veredicto",
   "/agente arquitecto haz el plano del módulo GEO en JARVIS — Arquitecto: plano técnico",
   "",
@@ -140,6 +141,8 @@ export async function route(input: string, actor: Actor): Promise<Reply> {
         if (!agent) return { text: `No conozco al agente «${esc(m[1])}». Usa /agentes.` };
         return await startRun(agent, m[2], { requestedBy: actor.profileId, source: actor.source, chatId: actor.chatId });
       }
+      case "informe":
+        return await informe(args, actor);
       case "_inbox":
         return await freeText(args, actor);
       default:
@@ -560,4 +563,27 @@ async function gasto(): Promise<Reply> {
       spent >= budget * 0.9 ? "⚠️ Cerca del tope: solo comandos sin IA." : "Dentro del presupuesto.",
     ].join("\n"),
   };
+}
+
+/** /informe <agente>: reenvía el último informe terminado (resumen legible + archivo .md en Telegram). */
+async function informe(q: string, actor: Actor): Promise<Reply> {
+  const nombre = q.trim();
+  if (!nombre) return { text: "Uso: /informe &lt;agente&gt;, por ejemplo /informe critico o /informe radar." };
+  const agent = await findAgent(nombre);
+  if (!agent) return { text: `No conozco al agente «${esc(nombre)}». Usa /agentes.` };
+  const { data: run } = await adminClient()
+    .from("agent_runs")
+    .select("output,summary,finished_at")
+    .eq("agent_id", agent.id)
+    .eq("status", "done")
+    .order("finished_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (!run?.output) return { text: `${esc(agent.name)} todavía no tiene informes terminados.` };
+  const { mdATelegram, resumenInforme, sendDocument } = await import("@/lib/telegram");
+  if (actor.chatId) {
+    const archivo = `${agent.slug}-${String(run.finished_at ?? "").slice(0, 10)}.md`;
+    after(() => sendDocument(actor.chatId!, archivo, run.output!, `${esc(agent.name)} · ${esc((run.summary ?? "").slice(0, 200))}`).then(() => undefined));
+  }
+  return { text: `📄 <b>${esc(agent.name)}</b> · último informe\n\n${mdATelegram(resumenInforme(run.output, 3200))}${actor.chatId ? "\n\n📎 Te envío el informe completo como archivo." : ""}` };
 }

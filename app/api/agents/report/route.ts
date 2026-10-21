@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { adminClient, log } from "@/lib/supabase/admin";
-import { sendMessage } from "@/lib/telegram";
+import { mdATelegram, resumenInforme, sendDocument, sendMessage } from "@/lib/telegram";
 
 export const dynamic = "force-dynamic";
 
@@ -85,7 +85,15 @@ export async function POST(req: NextRequest) {
   if (final) {
     await log("agent", `${agentName} ${status === "done" ? "terminó" : "falló"}: ${r.summary ?? ""}`, status === "done" ? "info" : "error", { run: runId });
     if (run.source_chat) {
-      await sendMessage(run.source_chat, `${status === "done" ? "✅" : "⚠️"} <b>${esc(agentName)}</b> ${status === "done" ? "terminó" : "no pudo terminar"}\n\n${esc(r.summary ?? "")}`);
+      const cabecera = `${status === "done" ? "✅" : "⚠️"} <b>${esc(agentName)}</b> ${status === "done" ? "terminó" : "no pudo terminar"}`;
+      if (status === "done" && r.output && r.output.length > 400) {
+        // Resumen legible + el informe completo como archivo (antes solo llegaba la frase corta)
+        await sendMessage(run.source_chat, `${cabecera}\n\n${mdATelegram(resumenInforme(r.output))}\n\n📎 Informe completo en el archivo adjunto y en <b>Agentes</b> del panel.`);
+        const nombre = `${agentName.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${now.slice(0, 10)}.md`;
+        await sendDocument(run.source_chat, nombre, r.output, `${esc(agentName)} · ${esc((r.summary ?? "").slice(0, 200))}`).catch(() => null);
+      } else {
+        await sendMessage(run.source_chat, `${cabecera}\n\n${esc(r.summary ?? "")}`);
+      }
     }
   }
   return NextResponse.json({ ok: true, run_id: runId });
