@@ -748,8 +748,10 @@ def instrucciones_taller(slug_agente: str, orden: str, contexto: dict | None) ->
 Lee `CLAUDE.md` y `docs/blueprint.md`. Mira `docs/avance.md` (créalo si no existe) para saber qué pasos ya están hechos.{ctx}
 
 MODO SIN INTERACCIÓN: nadie puede responderte. No hagas preguntas; si algo falta, toma el supuesto más razonable,
-anótalo en `docs/avance.md` y sigue. Si el plano está marcado como BORRADOR sin aprobación de Manuel, solo prepara
-(estructura, entorno, pruebas vacías) y no construyas funciones de negocio.
+anótalo en `docs/avance.md` y sigue. El plano cuenta como APROBADO si la orden de Manuel lo dice ("plano aprobado",
+"aprobado", "con mi visto bueno"); anota la aprobación con fecha en `docs/avance.md`. Si no está aprobado, solo prepara
+(estructura, entorno, pruebas vacías) y no construyas funciones de negocio. Construye solo la fase o los pasos que pide
+la orden; si no dice cuáles, haz el siguiente paso pendiente y para.
 
 Orden de Manuel (vía JARVIS):
 {orden}
