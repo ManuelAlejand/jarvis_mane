@@ -74,7 +74,7 @@ export function Escena(props: Props) {
   return (
     <>
     <Canvas
-      dpr={[1, 1.75]}
+      dpr={alta ? [1, 1.75] : [1, 1.5]}
       camera={{ fov: 38, near: 0.1, far: 300, position: [20, 22, 40] }}
       gl={{ antialias: true }}
       onPointerMissed={() => props.onSeleccionar(null)}

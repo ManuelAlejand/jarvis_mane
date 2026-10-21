@@ -3,7 +3,7 @@
  * Oficina 3D de JARVIS: los agentes son robots con armadura que trabajan en salas por proyecto.
  * Datos: los mismos de useJarvis (Supabase Realtime). No gasta tokens: solo dibuja lo que ya pasa.
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Component, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { JarvisState } from "@/components/useJarvis";
 import type { AgentRow, AgentRun, Project } from "@/lib/types";
 import { generarPlano, type Puesto, type Sala, type SalaSpec } from "@/lib/oficina/plano";
@@ -34,6 +34,7 @@ function salasDe(projects: Project[], agents: AgentRow[]): SalaSpec[] {
 
 /** Sala de cada agente: la de su proyecto; los agentes del estudio van a YouTube; si no, el Núcleo. */
 function salaDeAgente(a: AgentRow, projects: Project[], salas: Sala[]): Sala {
+  if (a.slug === "jarvis") return salas[0]; // JARVIS siempre en el Núcleo, aunque tenga proyecto asignado
   const porSlug = (slug: string) => salas.find((s) => s.slug === slug);
   const proyecto = a.project_id ? projects.find((p) => p.id === a.project_id) : undefined;
   return (proyecto && porSlug(proyecto.slug)) || (ESTUDIO.has(a.slug) && porSlug("youtube-shorts")) || salas[0];
@@ -50,10 +51,32 @@ function ago(iso: string | null) {
 
 const enCurso = (r?: AgentRun) => r?.status === "running" || r?.status === "queued";
 
+/** ¿El navegador puede dibujar 3D? (WebGL desactivado, GPU bloqueada o navegador muy viejo → no) */
+function hayWebGL() {
+  try {
+    const c = document.createElement("canvas");
+    return !!(c.getContext("webgl2") || c.getContext("webgl"));
+  } catch {
+    return false;
+  }
+}
+
+/** Si la escena 3D falla (modelo que no carga, contexto WebGL perdido…), se muestra la vista de respaldo. */
+class Respaldo3D extends Component<{ alterno: ReactNode; children: ReactNode }, { fallo: boolean }> {
+  state = { fallo: false };
+  static getDerivedStateFromError() {
+    return { fallo: true };
+  }
+  render() {
+    return this.state.fallo ? this.props.alterno : this.props.children;
+  }
+}
+
 export function OficinaView({ s }: { s: JarvisState }) {
   const [seleccion, setSeleccion] = useState<string | null>(null);
   const [ajustar, setAjustar] = useState(0);
   const [arrancando, setArrancando] = useState(true);
+  const [webgl] = useState(() => (typeof window === "undefined" ? true : hayWebGL()));
   useEffect(() => {
     const t = window.setTimeout(() => setArrancando(false), 2600);
     return () => window.clearTimeout(t);
@@ -297,16 +320,28 @@ export function OficinaView({ s }: { s: JarvisState }) {
             <p>J.A.R.V.I.S. · inicializando la oficina</p>
           </div>
         )}
-        <Escena
-          plano={plano}
-          mundo={mundo}
-          robots={robots}
-          paredes={paredes}
-          puestosEncendidos={puestosEncendidos}
-          onSeleccionar={setSeleccion}
-          enfocar={seleccion}
-          ajustarClave={ajustar}
-        />
+        {webgl ? (
+          <Respaldo3D alterno={<ListaRespaldo robots={robots} onElegir={setSeleccion} motivo="La escena 3D tuvo un problema en este navegador." />}>
+            <Escena
+              plano={plano}
+              mundo={mundo}
+              robots={robots}
+              paredes={paredes}
+              puestosEncendidos={puestosEncendidos}
+              onSeleccionar={setSeleccion}
+              enfocar={seleccion}
+              ajustarClave={ajustar}
+            />
+          </Respaldo3D>
+        ) : (
+          <ListaRespaldo robots={robots} onElegir={setSeleccion} motivo="Este navegador no tiene 3D (WebGL) activado." />
+        )}
+        {/* Resumen para lectores de pantalla */}
+        <ul className="sr-only" aria-live="polite">
+          {robots.map((r) => (
+            <li key={r.slug}>{r.nombre}{r.lider ? ", líder de sala" : ""}: {r.trabajando ? r.globo?.texto ?? "trabajando" : "libre"}</li>
+          ))}
+        </ul>
       </div>
 
       {agenteSel && (
@@ -390,5 +425,25 @@ function PanelAgente({ a, sala, lider, equipo, runs, onClose, onElegir }: {
         {runs.length === 0 && <li className="muted small">Sin trabajos todavía.</li>}
       </ul>
     </aside>
+  );
+}
+
+function ListaRespaldo({ robots, onElegir, motivo }: { robots: InfoRobot[]; onElegir: (slug: string) => void; motivo: string }) {
+  return (
+    <div className="oficina-respaldo">
+      <p className="muted small">{motivo} Te muestro el equipo en lista.</p>
+      <ul>
+        {robots.map((r) => (
+          <li key={r.slug}>
+            <span className={`estado-punto ${r.trabajando ? "working" : "idle"}`} />
+            <button className="enlace" onClick={() => onElegir(r.slug)}>
+              {r.esJarvis ? "J.A.R.V.I.S." : `${r.emoji ?? ""} ${r.nombre}`}
+            </button>
+            {r.lider && <span className="insignia-lider">Líder</span>}
+            <span className="muted small"> {r.globo?.texto ?? (r.trabajando ? "trabajando" : "libre")}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }

@@ -19,7 +19,8 @@ export function estadoDemo(paso: number): JarvisState {
   const yt = { project_id: "p1" };
   const f = (emoji: string, personality: string, frases: string[]) => ({ emoji, personality, frases });
   const agents = [
-    A("a0", "jarvis", "JARVIS", "Orquestador", 0, "chat", f("🤖", "Mayordomo digital: formal, preciso y con humor seco británico.", ["A sus órdenes, señor.", "Sistemas en línea al 100 %."])),
+    // JARVIS con proyecto asignado (como en la base real): debe quedarse en el Núcleo igual
+    A("a0", "jarvis", "JARVIS", "Orquestador", 0, "chat", { ...yt, ...f("🤖", "Mayordomo digital: formal, preciso y con humor seco británico.", ["A sus órdenes, señor.", "Sistemas en línea al 100 %."]) }),
     A("a1", "explorador", "Explorador", "Explorador de tendencias", 1, "api", { ...yt, ...f("📈", "Curioso e inquieto.", ["Las tendencias no duermen."]) }),
     A("a2", "investigador", "Investigador", "Investigador de nichos", 2, "api", { ...yt, ...f("🔎", "Meticuloso.", ["Necesito una fuente más."]) }),
     A("a3", "guionista", "Guionista", "Guionista", 3, "local", { ...yt, ...f("✍️", "Dramático y creativo.", ["Pero aquí está lo extraño…"]) }),

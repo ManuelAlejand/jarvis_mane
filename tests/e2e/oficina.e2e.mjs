@@ -106,6 +106,23 @@ async function abrir(viewport) {
 }
 
 await b.close();
+
+// ── Navegador sin 3D (WebGL desactivado): debe mostrar la lista de respaldo
+{
+  const sin3d = await chromium.launch({ executablePath: process.env.CHROMIUM || undefined, args: ["--disable-webgl", "--disable-webgl2", "--disable-3d-apis"] });
+  const p = await sin3d.newPage({ viewport: { width: 1280, height: 800 } });
+  const errores = [];
+  p.on("pageerror", (e) => errores.push(e.message));
+  await p.goto(`${BASE}/demo/oficina`);
+  await p.waitForSelector(".oficina-respaldo li", { timeout: 30000 });
+  ok("Sin WebGL muestra el equipo en lista", (await p.$$(".oficina-respaldo li")).length === 9);
+  await p.locator(".oficina-respaldo .enlace", { hasText: "Validador" }).click();
+  await p.waitForSelector(".oficina-panel h3", { timeout: 5000 });
+  ok("Sin WebGL también se abre el panel del agente", (await p.textContent(".oficina-panel h3")).includes("Validador"));
+  ok("Sin errores de JavaScript sin WebGL", errores.length === 0, errores.slice(0, 3).join(" | "));
+  await sin3d.close();
+}
+
 const fallas = resultados.filter((r) => !r.ok);
 console.log(`\n${resultados.length - fallas.length}/${resultados.length} pruebas pasaron`);
 process.exit(fallas.length ? 1 : 0);
